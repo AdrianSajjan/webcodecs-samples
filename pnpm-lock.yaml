@@ -14,6 +14,9 @@ importers:
       mp4-muxer:
         specifier: ^5.1.5
         version: 5.1.5
+      mp4box:
+        specifier: ^0.5.3
+        version: 0.5.3
       nanoid:
         specifier: ^5.0.9
         version: 5.0.9
@@ -312,6 +315,9 @@ packages:
   mp4-muxer@5.1.5:
     resolution: {integrity: sha512-dRk4STKmR7sIx12kMBa21DaIxdMG0w4tYwOqi8+Z4NW03I1QloRBWSxU4kReztDGdz5gWp4jSwIKWOIaP9Ia+g==}
 
+  mp4box@0.5.3:
+    resolution: {integrity: sha512-RIvyFZdPDIg3+mL6vUdPBSyQRrEfKO3ryAeJ4xJJV7HBHQUH3KfLlZRzfSpBHCd/HqR63HfbrWQI/CwXDvYENQ==}
+
   nanoid@3.3.8:
     resolution: {integrity: sha512-WNLf5Sd8oZxOm+TzppcYk8gVOgP+l58xNy58D0nbUnOxOWRWvlcCV4kUF7ltmI6PsrLl/BgKEyS4mqsGChFN0w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -574,6 +580,8 @@ snapshots:
     dependencies:
       '@types/dom-webcodecs': 0.1.13
       '@types/wicg-file-system-access': 2020.9.8
+
+  mp4box@0.5.3: {}
 
   nanoid@3.3.8: {}
 

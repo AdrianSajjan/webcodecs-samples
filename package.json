@@ -17,6 +17,7 @@
   "dependencies": {
     "@types/wicg-file-system-access": "^2023.10.5",
     "mp4-muxer": "^5.1.5",
+    "mp4box": "^0.5.3",
     "nanoid": "^5.0.9",
     "webm-muxer": "^5.0.3"
   }
