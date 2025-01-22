@@ -1,16 +1,6 @@
 import * as MuxerMP4 from "mp4-muxer";
+import * as MuxerWebM from "webm-muxer";
 import { assert } from "@/libs/utils";
-
-const mTargetWidth = 1920;
-const mTargetHeight = 1080;
-
-const mFrameRatePerSecond = 30;
-const mVideoBitrate = 8_000_000;
-const mFrameInterval = 1000 / mFrameRatePerSecond;
-
-const mAudioBitrate = 128_000;
-const mAudioSampleRate = 48_000;
-const mAudioNumberOfChannels = 2;
 
 export interface RecordStreamProps {
   videoTrackSettings: MediaTrackSettings;
@@ -19,39 +9,58 @@ export interface RecordStreamProps {
   audioReadableStream?: ReadableStream<AudioData>;
 }
 
-export class Recorder {
-  recording: boolean;
+type Muxer = MuxerMP4.Muxer<MuxerMP4.ArrayBufferTarget> | MuxerWebM.Muxer<MuxerWebM.ArrayBufferTarget>;
 
-  private canvas: OffscreenCanvas;
-  private context: OffscreenCanvasRenderingContext2D;
+export class BaseRecorder<T extends Muxer> {
+  protected readonly mAudioEncoderCodec: string = "";
+  protected readonly mVideoEncoderCodec: string = "";
 
-  private startTime: number;
-  private encodedFrames: number;
-  private lastFrameTime: number;
-  private droppedFrames: number;
+  protected readonly mVideoMuxerCodec: string = "";
+  protected readonly mAudioMuxerCodec: string = "";
 
-  private maxFPS: number;
-  private averageFPS: number;
-  private minFPS: number;
-  private targetFPS: number;
-  private targetFrameInterval: number;
+  protected readonly mTargetWidth = 1920;
+  protected readonly mTargetHeight = 1080;
 
-  private videoEncoder?: VideoEncoder;
-  private videoTrackSettings?: MediaTrackSettings;
-  private videoReadableStream?: ReadableStream<VideoFrame>;
-  private videoWritableStream?: WritableStream<VideoFrame>;
+  protected readonly mFrameRatePerSecond = 30;
+  protected readonly mVideoBitrate = 8_000_000;
+  protected readonly mFrameInterval = 1000 / this.mFrameRatePerSecond;
 
-  private audioEncoder?: AudioEncoder;
-  private audioTrackSettings?: MediaTrackSettings;
-  private audioReadableStream?: ReadableStream<AudioData>;
-  private audioWritableStream?: WritableStream<AudioData>;
+  protected readonly mAudioBitrate = 128_000;
+  protected readonly mAudioSampleRate = 48_000;
+  protected readonly mAudioNumberOfChannels = 2;
 
-  private intervalHandle?: NodeJS.Timeout;
-  private muxerMP4?: MuxerMP4.Muxer<MuxerMP4.ArrayBufferTarget>;
-  // private muxerWEBM?: MuxerMP4.Muxer<MuxerMP4.ArrayBufferTarget>;
+  protected clone: boolean;
+  protected recording: boolean;
+  protected canvas: OffscreenCanvas;
+  protected context: OffscreenCanvasRenderingContext2D;
 
-  constructor() {
+  protected startTime: number;
+  protected encodedFrames: number;
+  protected lastFrameTime: number;
+  protected droppedFrames: number;
+
+  protected maxFPS: number;
+  protected averageFPS: number;
+  protected minFPS: number;
+  protected targetFPS: number;
+  protected targetFrameInterval: number;
+
+  protected videoEncoder?: VideoEncoder;
+  protected videoTrackSettings?: MediaTrackSettings;
+  protected videoReadableStream?: ReadableStream<VideoFrame>;
+  protected videoWritableStream?: WritableStream<VideoFrame>;
+
+  protected audioEncoder?: AudioEncoder;
+  protected audioTrackSettings?: MediaTrackSettings;
+  protected audioReadableStream?: ReadableStream<AudioData>;
+  protected audioWritableStream?: WritableStream<AudioData>;
+
+  protected intervalHandle?: NodeJS.Timeout;
+  protected muxer?: T;
+
+  protected constructor(clone: boolean) {
     this.recording = false;
+    this.clone = clone;
 
     this.startTime = 0;
     this.encodedFrames = 0;
@@ -59,20 +68,16 @@ export class Recorder {
     this.droppedFrames = 0;
 
     this.averageFPS = 0;
-    this.targetFPS = mFrameRatePerSecond;
+    this.targetFPS = this.mFrameRatePerSecond;
     this.minFPS = Number.MAX_SAFE_INTEGER;
     this.maxFPS = Number.MIN_SAFE_INTEGER;
-    this.targetFrameInterval = mFrameInterval;
+    this.targetFrameInterval = this.mFrameInterval;
 
-    this.canvas = new OffscreenCanvas(mTargetWidth, mTargetHeight);
+    this.canvas = new OffscreenCanvas(this.mTargetWidth, this.mTargetHeight);
     this.context = this.canvas.getContext("2d", { alpha: false })!;
   }
 
-  static createInstance() {
-    return new Recorder();
-  }
-
-  private resetRecorderStats() {
+  protected resetRecorderStats() {
     this.startTime = 0;
     this.encodedFrames = 0;
     this.lastFrameTime = 0;
@@ -83,13 +88,13 @@ export class Recorder {
     this.maxFPS = Number.MIN_SAFE_INTEGER;
   }
 
-  private scaleResolution(width: number, height: number) {
+  protected scaleResolution(width: number, height: number) {
     let scaledWidth = width;
     let scaledHeight = height;
 
-    if (width > mTargetWidth || height > mTargetHeight) {
-      const widthRatio = mTargetWidth / width;
-      const heightRatio = mTargetHeight / height;
+    if (width > this.mTargetWidth || height > this.mTargetHeight) {
+      const widthRatio = this.mTargetWidth / width;
+      const heightRatio = this.mTargetHeight / height;
       const scale = Math.min(widthRatio, heightRatio);
 
       scaledWidth = Math.floor(width * scale);
@@ -105,26 +110,19 @@ export class Recorder {
     };
   }
 
-  private muxerAudioConfig(): MuxerMP4.MuxerOptions<MuxerMP4.ArrayBufferTarget>["audio"] {
-    if (this.audioTrackSettings) {
-      return {
-        codec: "aac",
-        sampleRate: this.audioTrackSettings.sampleRate || mAudioSampleRate,
-        numberOfChannels: this.audioTrackSettings.channelCount || mAudioNumberOfChannels,
-      };
-    }
-  }
-
-  private async handleSetupAudioWriter() {
+  protected async handleSetupAudioWriter() {
     if (!this.audioReadableStream) return;
 
     // Setup the audio writer
     this.audioWritableStream = new WritableStream<AudioData>(
       {
         write: async (data) => {
-          assert(this.audioEncoder);
-          if (this.audioEncoder.encodeQueueSize <= 2) this.audioEncoder.encode(data);
-          data.close();
+          const frame = this.clone ? data.clone() : data;
+          if (this.recording) {
+            assert(this.audioEncoder);
+            if (this.audioEncoder.encodeQueueSize <= 2) this.audioEncoder.encode(frame);
+          }
+          frame.close();
         },
         close: () => {
           console.log("Audio stream closed, cleaning up...");
@@ -142,7 +140,8 @@ export class Recorder {
     await this.audioReadableStream.pipeTo(this.audioWritableStream);
   }
 
-  private handleCaptureCanvasFrame() {
+  protected handleCaptureCanvasFrame() {
+    if (!this.recording) return;
     assert(this.videoEncoder);
 
     // Check if the queue is not full
@@ -189,10 +188,16 @@ export class Recorder {
     }
   }
 
-  private handleEncodeCanvasFrame() {
+  protected handleEncodeCanvasFrame() {
     this.intervalHandle = setInterval(() => {
-      this.handleCaptureCanvasFrame();
+      if (this.recording) {
+        this.handleCaptureCanvasFrame();
+      }
     }, this.targetFrameInterval);
+  }
+
+  protected handleSetupMuxer() {
+    // Setup the muxer - override in subclasses
   }
 
   async handleSetupCanvasWriter() {
@@ -201,7 +206,8 @@ export class Recorder {
     // Setup the canvas writer
     this.videoWritableStream = new WritableStream<VideoFrame>(
       {
-        write: async (frame) => {
+        write: async (data) => {
+          const frame = this.clone ? data.clone() : data;
           this.context.drawImage(frame, 0, 0, this.canvas.width, this.canvas.height);
           frame.close();
         },
@@ -221,50 +227,37 @@ export class Recorder {
     await this.videoReadableStream.pipeTo(this.videoWritableStream);
   }
 
-  async handleRecordStream({
-    videoReadableStream,
-    audioReadableStream,
-    audioTrackSettings,
-    videoTrackSettings,
-  }: RecordStreamProps) {
+  async handleCaptureStream(props: RecordStreamProps) {
     // Initialize the video state
-    this.videoTrackSettings = videoTrackSettings;
-    this.videoReadableStream = videoReadableStream;
+    this.videoTrackSettings = props.videoTrackSettings;
+    this.videoReadableStream = props.videoReadableStream;
 
     // Initialize the audio state
-    this.audioTrackSettings = audioTrackSettings;
-    this.audioReadableStream = audioReadableStream;
+    this.audioTrackSettings = props.audioTrackSettings;
+    this.audioReadableStream = props.audioReadableStream;
+
+    // Extract the video dimensions
+    const height = this.videoTrackSettings.height || this.mTargetHeight;
+    const width = this.videoTrackSettings.width || this.mTargetWidth;
 
     // Initialize the canvas state
-    const dimensions = this.scaleResolution(
-      this.videoTrackSettings.width || mTargetWidth,
-      this.videoTrackSettings.height || mTargetHeight
-    );
+    const dimensions = this.scaleResolution(width, height);
     this.canvas.width = dimensions.width;
     this.canvas.height = dimensions.height;
 
     // Initialize FPS and Bitrate
-    this.targetFPS = videoTrackSettings.frameRate || mFrameRatePerSecond;
+    this.targetFPS = props.videoTrackSettings.frameRate || this.mFrameRatePerSecond;
     this.targetFrameInterval = 1000 / this.targetFPS;
 
-    // Initialize the muxer
-    this.muxerMP4 = new MuxerMP4.Muxer({
-      target: new MuxerMP4.ArrayBufferTarget(),
-      fastStart: "in-memory",
-      firstTimestampBehavior: "offset",
-      video: {
-        codec: "avc",
-        width: this.canvas.width,
-        height: this.canvas.height,
-        frameRate: this.targetFPS,
-      },
-      audio: this.muxerAudioConfig(),
-    });
+    // Initialize the muxer - override in subclasses
+    this.handleSetupMuxer();
 
     // Initialize the video encoder
     this.videoEncoder = new VideoEncoder({
       output: (chunk, meta) => {
-        this.muxerMP4!.addVideoChunk(chunk, meta);
+        if (this.recording) {
+          this.muxer!.addVideoChunk(chunk, meta);
+        }
       },
       error: (error) => {
         console.warn("Failed to write chunk:", error);
@@ -273,22 +266,24 @@ export class Recorder {
 
     // Configure the video encoder and check if the config is supported
     const config: VideoEncoderConfig = {
-      bitrate: mVideoBitrate,
-      codec: "avc1.64002A",
+      bitrate: this.mVideoBitrate,
+      codec: this.mVideoEncoderCodec,
       width: this.canvas.width,
       framerate: this.targetFPS,
       height: this.canvas.height,
     };
 
     const support = await VideoEncoder.isConfigSupported(config);
-    console.assert(support.supported);
+    console.assert(support.supported, "Video config not supported:", config);
     this.videoEncoder.configure(config);
 
     // Initialize the audio encoder
-    if (this.audioReadableStream) {
+    if (this.audioTrackSettings) {
       this.audioEncoder = new AudioEncoder({
         output: (chunk, meta) => {
-          this.muxerMP4!.addAudioChunk(chunk, meta);
+          if (this.recording) {
+            this.muxer!.addAudioChunk(chunk, meta);
+          }
         },
         error: (error) => {
           console.warn("Failed to write chunk:", error);
@@ -297,27 +292,29 @@ export class Recorder {
 
       // Configure the audio encoder and check if the config is supported
       const config: AudioEncoderConfig = {
-        codec: "mp4a.40.2",
-        numberOfChannels: this.audioTrackSettings?.channelCount || mAudioNumberOfChannels,
-        sampleRate: this.audioTrackSettings?.sampleRate || mAudioSampleRate,
-        bitrate: mAudioBitrate,
+        bitrate: this.mAudioBitrate,
+        numberOfChannels: this.audioTrackSettings.channelCount || this.mAudioNumberOfChannels,
+        sampleRate: this.audioTrackSettings.sampleRate || this.mAudioSampleRate,
+        codec: this.mAudioEncoderCodec,
       };
 
       const support = await AudioEncoder.isConfigSupported(config);
-      console.assert(support.supported);
+      console.assert(support.supported, "Audio config not supported:", config);
       this.audioEncoder.configure(config);
     }
 
-    // Set the recording states
-    this.recording = true;
-    this.encodedFrames = 0;
-    this.lastFrameTime = 0;
-    this.startTime = performance.now();
-
     // Draw the stream to canvas and pass the frames to the encoder
-    this.handleSetupCanvasWriter();
+    const promises = [this.handleSetupCanvasWriter(), this.handleSetupAudioWriter()];
+    Promise.all(promises);
     this.handleEncodeCanvasFrame();
-    this.handleSetupAudioWriter();
+  }
+
+  async handleRecordStream() {
+    this.startTime = performance.now();
+    this.encodedFrames = 0;
+    this.droppedFrames = 0;
+    this.lastFrameTime = 0;
+    this.recording = true;
   }
 
   async handleSaveStream() {
@@ -339,9 +336,9 @@ export class Recorder {
     await this.videoEncoder.flush();
     this.videoEncoder.close();
 
-    assert(this.muxerMP4);
-    this.muxerMP4.finalize();
-    return this.muxerMP4.target.buffer;
+    assert(this.muxer);
+    this.muxer.finalize();
+    return this.muxer.target.buffer;
   }
 
   handleLogRecordingStats() {

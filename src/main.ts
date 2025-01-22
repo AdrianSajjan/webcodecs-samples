@@ -1,7 +1,13 @@
-import { assert } from "@/libs/utils";
+import { assert, wait } from "@/libs/utils";
 import { RuntimeEvents, RuntimeMessage } from "@/types/events";
+import { nanoid } from "nanoid";
 
 const mSampleRate = 48000;
+
+interface SaveStreamBuffer {
+  webm: ArrayBuffer;
+  mp4: ArrayBuffer;
+}
 
 class Core {
   recording: boolean;
@@ -13,8 +19,8 @@ class Core {
   private audioContext?: AudioContext;
   private audioDestination?: MediaStreamAudioDestinationNode;
 
-  private saveStreamResolver?: PromiseWithResolvers<Blob> | null;
-  private recordStreamResolver?: PromiseWithResolvers<void> | null;
+  private captureStreamResolver?: PromiseWithResolvers<void> | null;
+  private releaseStreamResolver?: PromiseWithResolvers<SaveStreamBuffer> | null;
 
   private worker: Worker;
   private runtimeMessageHandler = this.handleRuntimeMessage.bind(this);
@@ -53,19 +59,19 @@ class Core {
         console.error(data.payload.error);
         break;
 
-      case RuntimeEvents.RecordStreamSuccess:
-        this.recordStreamResolver?.resolve();
+      case RuntimeEvents.CaptureStreamSuccess:
+        this.captureStreamResolver?.resolve();
         break;
-      case RuntimeEvents.RecordStreamError:
-        this.recordStreamResolver?.reject(data.payload.error);
+      case RuntimeEvents.CaptureStreamError:
+        this.captureStreamResolver?.reject(data.payload.error);
         break;
 
       case RuntimeEvents.SaveStreamSuccess:
-        const blob = new Blob([data.payload], { type: "video/mp4" });
-        this.saveStreamResolver?.resolve(blob);
+        console.log("Save stream success", data.payload);
+        this.releaseStreamResolver?.resolve(data.payload);
         break;
       case RuntimeEvents.SaveStreamError:
-        this.saveStreamResolver?.reject(data.payload.error);
+        this.releaseStreamResolver?.reject(data.payload.error);
         break;
     }
   }
@@ -75,12 +81,44 @@ class Core {
 
     this.userStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
     this.desktopStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    await wait(500);
 
     this.video.addEventListener("loadedmetadata", this.video.play.bind(this.video), { once: true });
     this.video.srcObject = this.desktopStream;
 
     this.setupAudioMixing();
+    await this.initializeWorkerStream();
     this.capturing = true;
+  }
+
+  private async initializeWorkerStream() {
+    assert(this.videoTrack);
+    const videoTrackSettings = this.videoTrack.getSettings();
+    const videoReadableStream = new MediaStreamTrackProcessor({ track: this.videoTrack }).readable;
+    this.captureStreamResolver = Promise.withResolvers();
+
+    if (!this.audioTrack) {
+      this.worker.postMessage(
+        {
+          type: RuntimeEvents.CaptureStream,
+          payload: { videoTrackSettings, videoReadableStream },
+        },
+        [videoReadableStream]
+      );
+      return await this.captureStreamResolver.promise;
+    }
+
+    const audioTrackSettings = this.audioTrack.getSettings();
+    const audioReadableStream = new MediaStreamTrackProcessor({ track: this.audioTrack }).readable;
+
+    this.worker.postMessage(
+      {
+        type: RuntimeEvents.CaptureStream,
+        payload: { videoTrackSettings, videoReadableStream, audioTrackSettings, audioReadableStream },
+      },
+      [videoReadableStream, audioReadableStream]
+    );
+    await this.captureStreamResolver.promise;
   }
 
   private setupAudioMixing() {
@@ -113,44 +151,17 @@ class Core {
   }
 
   async handleRecordStream() {
-    if (this.recording || !this.capturing) return;
+    if (!this.capturing) return;
 
     this.recording = true;
-    assert(this.videoTrack);
-
-    const videoTrackSettings = this.videoTrack.getSettings();
-    const videoReadableStream = new MediaStreamTrackProcessor({ track: this.videoTrack }).readable;
-    this.recordStreamResolver = Promise.withResolvers();
-
-    if (!this.audioTrack) {
-      this.worker.postMessage(
-        {
-          type: RuntimeEvents.RecordStream,
-          payload: { videoTrackSettings, videoReadableStream },
-        },
-        [videoReadableStream]
-      );
-      return await this.recordStreamResolver.promise;
-    }
-
-    const audioTrackSettings = this.audioTrack.getSettings();
-    const audioReadableStream = new MediaStreamTrackProcessor({ track: this.audioTrack }).readable;
-
-    this.worker.postMessage(
-      {
-        type: RuntimeEvents.RecordStream,
-        payload: { videoTrackSettings, videoReadableStream, audioTrackSettings, audioReadableStream },
-      },
-      [videoReadableStream, audioReadableStream]
-    );
-    await this.recordStreamResolver.promise;
+    this.worker.postMessage({ type: RuntimeEvents.RecordStream });
   }
 
   async handleSaveStream() {
     if (!this.recording) return;
 
     this.recording = false;
-    this.saveStreamResolver = Promise.withResolvers();
+    this.releaseStreamResolver = Promise.withResolvers();
     this.worker.postMessage({ type: RuntimeEvents.SaveStream });
 
     assert(this.desktopStream);
@@ -172,15 +183,18 @@ class Core {
       this.audioContext = undefined;
     }
 
-    const blob = await this.saveStreamResolver.promise;
-    this.handleDownloadBlob(blob);
+    const buffer = await this.releaseStreamResolver.promise;
+    Object.entries(buffer).forEach(([key, value]) => {
+      const blob = new Blob([value], { type: "video/" + key });
+      this.handleDownloadBlob(blob);
+    });
   }
 
   handleDownloadBlob(blob: Blob) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "video.mp4";
+    a.download = nanoid() + "." + blob.type.split("/")[1];
     a.click();
   }
 }
@@ -218,8 +232,8 @@ window.addEventListener("load", () => {
   captureButton.addEventListener("click", async () => {
     try {
       captureButton.disabled = true;
-      captureButton.textContent = "Capturing...";
       await core.handleCaptureStream();
+      captureButton.textContent = "Capturing...";
     } catch (error) {
       alert(JSON.stringify(error));
       captureButton.disabled = false;
@@ -230,8 +244,8 @@ window.addEventListener("load", () => {
   recordButton.addEventListener("click", async () => {
     try {
       recordButton.disabled = true;
-      recordButton.textContent = "Recording...";
       await core.handleRecordStream();
+      recordButton.textContent = "Recording...";
     } catch (error) {
       alert(JSON.stringify(error));
       recordButton.disabled = false;
