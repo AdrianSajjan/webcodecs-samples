@@ -162,6 +162,16 @@ class Core {
       this.userStream = undefined;
     }
 
+    if (this.audioDestination) {
+      this.audioDestination.stream.getTracks().forEach((track) => track.stop());
+      this.audioDestination = undefined;
+    }
+
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = undefined;
+    }
+
     const blob = await this.saveStreamResolver.promise;
     this.handleDownloadBlob(blob);
   }
