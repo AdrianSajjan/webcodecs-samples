@@ -246,8 +246,6 @@ export class Recorder {
     // Initialize FPS and Bitrate
     this.targetFPS = videoTrackSettings.frameRate || mFrameRatePerSecond;
     this.targetFrameInterval = 1000 / this.targetFPS;
-    console.log("Target FPS:", this.targetFPS);
-    console.log("Target frame interval:", this.targetFrameInterval);
 
     // Initialize the muxer
     this.muxerMP4 = new MuxerMP4.Muxer({

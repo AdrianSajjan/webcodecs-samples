@@ -1,12 +1,17 @@
 import { assert } from "@/libs/utils";
 import { RuntimeEvents, RuntimeMessage } from "@/types/events";
 
+const mSampleRate = 48000;
+
 class Core {
   recording: boolean;
+  capturing: boolean;
   video: HTMLVideoElement;
 
   private userStream?: MediaStream;
   private desktopStream?: MediaStream;
+  private audioContext?: AudioContext;
+  private audioDestination?: MediaStreamAudioDestinationNode;
 
   private saveStreamResolver?: PromiseWithResolvers<Blob> | null;
   private recordStreamResolver?: PromiseWithResolvers<void> | null;
@@ -17,12 +22,21 @@ class Core {
   constructor(video: HTMLVideoElement) {
     this.video = video;
     this.recording = false;
+    this.capturing = false;
     this.worker = new Worker(new URL("./worker/recorder.ts", import.meta.url));
     this.handleSetupWorker();
   }
 
   static createInstance(video: HTMLVideoElement) {
     return new Core(video);
+  }
+
+  private get videoTrack() {
+    return this.desktopStream?.getVideoTracks()[0];
+  }
+
+  private get audioTrack() {
+    return this.audioDestination?.stream.getAudioTracks()[0];
   }
 
   private handleSetupWorker() {
@@ -57,32 +71,58 @@ class Core {
   }
 
   async handleCaptureStream() {
-    this.desktopStream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        displaySurface: "browser",
-      },
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-      },
-    });
+    if (this.capturing) return;
+
+    this.userStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+    this.desktopStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+
     this.video.addEventListener("loadedmetadata", this.video.play.bind(this.video), { once: true });
     this.video.srcObject = this.desktopStream;
+
+    this.setupAudioMixing();
+    this.capturing = true;
+  }
+
+  private setupAudioMixing() {
+    // Create audio context
+    const desktopAudio = this.desktopStream?.getAudioTracks()[0];
+    const microphoneAudio = this.userStream?.getAudioTracks()[0];
+
+    const desktopSampleRate = desktopAudio?.getSettings().sampleRate || mSampleRate;
+    const microphoneSampleRate = microphoneAudio?.getSettings().sampleRate || mSampleRate;
+    const sampleRate = Math.min(mSampleRate, desktopSampleRate, microphoneSampleRate);
+
+    this.audioContext = new AudioContext({ sampleRate });
+    this.audioDestination = this.audioContext.createMediaStreamDestination();
+
+    // Create and connect desktop audio source
+    if (desktopAudio) {
+      const desktopSource = this.audioContext.createMediaStreamSource(new MediaStream([desktopAudio]));
+      const desktopGain = this.audioContext.createGain();
+      desktopGain.gain.value = 0.7; // Adjust desktop volume (0.0 to 1.0);
+      desktopSource.connect(desktopGain).connect(this.audioDestination);
+    }
+
+    // Create and connect microphone audio source
+    if (microphoneAudio) {
+      const microphoneSource = this.audioContext.createMediaStreamSource(new MediaStream([microphoneAudio]));
+      const microphoneGain = this.audioContext.createGain();
+      microphoneGain.gain.value = 1.0; // Adjust microphone volume (0.0 to 1.0)
+      microphoneSource.connect(microphoneGain).connect(this.audioDestination);
+    }
   }
 
   async handleRecordStream() {
-    if (this.recording || !this.desktopStream) return;
+    if (this.recording || !this.capturing) return;
 
     this.recording = true;
-    const videoTrack = this.desktopStream.getVideoTracks().at(0);
-    const audioTrack = this.desktopStream.getAudioTracks().at(0);
+    assert(this.videoTrack);
 
-    assert(videoTrack);
-    const videoTrackSettings = videoTrack.getSettings();
-    const videoReadableStream = new MediaStreamTrackProcessor({ track: videoTrack }).readable;
+    const videoTrackSettings = this.videoTrack.getSettings();
+    const videoReadableStream = new MediaStreamTrackProcessor({ track: this.videoTrack }).readable;
+    this.recordStreamResolver = Promise.withResolvers();
 
-    if (!audioTrack) {
-      this.recordStreamResolver = Promise.withResolvers();
+    if (!this.audioTrack) {
       this.worker.postMessage(
         {
           type: RuntimeEvents.RecordStream,
@@ -90,14 +130,12 @@ class Core {
         },
         [videoReadableStream]
       );
-      await this.recordStreamResolver.promise;
-      return;
+      return await this.recordStreamResolver.promise;
     }
 
-    const audioTrackSettings = audioTrack.getSettings();
-    const audioReadableStream = new MediaStreamTrackProcessor({ track: audioTrack }).readable;
+    const audioTrackSettings = this.audioTrack.getSettings();
+    const audioReadableStream = new MediaStreamTrackProcessor({ track: this.audioTrack }).readable;
 
-    this.recordStreamResolver = Promise.withResolvers();
     this.worker.postMessage(
       {
         type: RuntimeEvents.RecordStream,
@@ -118,6 +156,11 @@ class Core {
     assert(this.desktopStream);
     this.desktopStream.getTracks().forEach((track) => track.stop());
     this.desktopStream = undefined;
+
+    if (this.userStream) {
+      this.userStream.getTracks().forEach((track) => track.stop());
+      this.userStream = undefined;
+    }
 
     const blob = await this.saveStreamResolver.promise;
     this.handleDownloadBlob(blob);
