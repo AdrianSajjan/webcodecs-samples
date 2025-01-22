@@ -6,7 +6,13 @@ export interface RuntimeMessage {
 export enum RuntimeEvents {
   SetupWorker = "setup.worker",
   SetupWorkerSuccess = "setup.worker.success",
+  SetupWorkerError = "setup.worker.error",
 
-  StartCapture = "start.capture",
-  SaveCapture = "save.capture",
+  SaveStream = "save.stream",
+  SaveStreamSuccess = "save.stream.success",
+  SaveStreamError = "save.stream.error",
+
+  RecordStream = "record.stream",
+  RecordStreamSuccess = "record.stream.success",
+  RecordStreamError = "record.stream.error",
 }
