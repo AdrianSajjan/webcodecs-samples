@@ -2,14 +2,17 @@ import * as MuxerMP4 from "mp4-muxer";
 import * as MuxerWebM from "webm-muxer";
 import { assert } from "@/libs/utils";
 
-export interface RecordStreamProps {
+export type Muxer = MuxerMP4.Muxer<MuxerMP4.ArrayBufferTarget> | MuxerWebM.Muxer<MuxerWebM.ArrayBufferTarget>;
+export interface BaseRecorderInit {
+  clone?: boolean;
+}
+
+export interface RecorderCaptureProps {
   videoTrackSettings: MediaTrackSettings;
   videoReadableStream: ReadableStream<VideoFrame>;
   audioTrackSettings?: MediaTrackSettings;
   audioReadableStream?: ReadableStream<AudioData>;
 }
-
-type Muxer = MuxerMP4.Muxer<MuxerMP4.ArrayBufferTarget> | MuxerWebM.Muxer<MuxerWebM.ArrayBufferTarget>;
 
 export class BaseRecorder<T extends Muxer> {
   protected readonly mAudioEncoderCodec: string = "";
@@ -58,9 +61,9 @@ export class BaseRecorder<T extends Muxer> {
   protected intervalHandle?: NodeJS.Timeout;
   protected muxer?: T;
 
-  protected constructor(clone: boolean) {
+  protected constructor(props?: BaseRecorderInit) {
     this.recording = false;
-    this.clone = clone;
+    this.clone = props?.clone ?? false;
 
     this.startTime = 0;
     this.encodedFrames = 0;
@@ -227,7 +230,7 @@ export class BaseRecorder<T extends Muxer> {
     await this.videoReadableStream.pipeTo(this.videoWritableStream);
   }
 
-  async handleCaptureStream(props: RecordStreamProps) {
+  async handleCaptureStream(props: RecorderCaptureProps) {
     // Initialize the video state
     this.videoTrackSettings = props.videoTrackSettings;
     this.videoReadableStream = props.videoReadableStream;

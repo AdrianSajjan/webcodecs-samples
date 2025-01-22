@@ -1,5 +1,5 @@
 import * as MuxerWebM from "webm-muxer";
-import { BaseRecorder } from "@/packages/base-recorder";
+import { BaseRecorder, BaseRecorderInit } from "@/packages/base-recorder";
 
 export class WebMRecorder extends BaseRecorder<MuxerWebM.Muxer<MuxerWebM.ArrayBufferTarget>> {
   protected override readonly mAudioEncoderCodec = "opus";
@@ -8,13 +8,13 @@ export class WebMRecorder extends BaseRecorder<MuxerWebM.Muxer<MuxerWebM.ArrayBu
   protected override readonly mVideoMuxerCodec = "V_VP9";
   protected override readonly mAudioMuxerCodec = "A_OPUS";
 
-  constructor(clone: boolean) {
-    super(clone);
+  constructor(props?: BaseRecorderInit) {
+    super(props);
     console.log("WebM Recorder is initialized");
   }
 
-  static createInstance(clone: boolean) {
-    return new WebMRecorder(clone);
+  static createInstance(props?: BaseRecorderInit) {
+    return new WebMRecorder(props);
   }
 
   protected override handleSetupMuxer() {

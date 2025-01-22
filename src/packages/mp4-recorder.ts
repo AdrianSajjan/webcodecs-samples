@@ -1,5 +1,5 @@
 import * as MuxerMP4 from "mp4-muxer";
-import { BaseRecorder } from "@/packages/base-recorder";
+import { BaseRecorder, BaseRecorderInit } from "@/packages/base-recorder";
 
 export class MP4Recorder extends BaseRecorder<MuxerMP4.Muxer<MuxerMP4.ArrayBufferTarget>> {
   protected override readonly mAudioEncoderCodec = "mp4a.40.2";
@@ -8,13 +8,13 @@ export class MP4Recorder extends BaseRecorder<MuxerMP4.Muxer<MuxerMP4.ArrayBuffe
   protected override readonly mVideoMuxerCodec = "avc";
   protected override readonly mAudioMuxerCodec = "aac";
 
-  constructor(clone: boolean) {
-    super(clone);
+  constructor(props?: BaseRecorderInit) {
+    super(props);
     console.log("MP4Recorder is initialized");
   }
 
-  static createInstance(clone: boolean) {
-    return new MP4Recorder(clone);
+  static createInstance(props?: BaseRecorderInit) {
+    return new MP4Recorder(props);
   }
 
   protected override handleSetupMuxer() {
