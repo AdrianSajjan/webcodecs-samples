@@ -86,7 +86,7 @@ select {
 }
 
 #player .player-seek input {
-    width: 5rem;
+    width: 8rem;
 }
 
 #player .mp4-player {

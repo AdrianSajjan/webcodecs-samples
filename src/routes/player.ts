@@ -5,11 +5,13 @@ export const Page = html`
   <section id="player">
     <div class="player-controls">
       <select id="speed">
-        <option value="0.25">0.25</option>
-        <option value="0.5">0.5</option>
         <option value="1">1</option>
         <option value="2">2</option>
         <option value="4">4</option>
+        <option value="8">8</option>
+        <option value="0.75">0.75</option>
+        <option value="0.5">0.5</option>
+        <option value="0.25">0.25</option>
       </select>
       <button id="play">Play</button>
       <button id="pause">Pause</button>
@@ -23,8 +25,9 @@ export const Page = html`
 `;
 
 export function Script() {
+  const url = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
   const container = document.getElementById("mp4-player") as HTMLDivElement;
-  const mp4Player = MP4Player.createInstance(container, "http://localhost:5173/videos/sample.mp4");
+  const mp4Player = MP4Player.createInstance(container, url);
 
   const playButton = document.getElementById("play") as HTMLButtonElement;
   playButton.addEventListener("click", () => mp4Player.play());

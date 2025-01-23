@@ -1,7 +1,11 @@
-import { VideoPlayerEvents } from "./constants/events";
 import type { RuntimeMessage } from "@/shared/types/events";
+import { waitUnitWorkerEvent } from "@/shared/libs/utils";
+
+import { VideoPlayerEvents } from "./constants/events";
+import { MP4FileMetadata } from "./demuxer";
 
 type Status = "idle" | "pending" | "ready" | "error";
+
 type PlaybackState = "playing" | "paused" | "ended";
 
 export class MP4Player {
@@ -9,12 +13,15 @@ export class MP4Player {
   status: Status;
   playback: PlaybackState;
 
-  private worker: Worker;
-  private canvas: HTMLCanvasElement;
-  private container: HTMLElement;
+  originalWidth: number;
+  originalHeight: number;
 
-  private codedWidth: number;
-  private codedHeight: number;
+  metadata: MP4FileMetadata | null;
+  config: VideoDecoderConfig | null;
+
+  private worker: Worker;
+  private container: HTMLElement;
+  private canvas: HTMLCanvasElement;
   private resizeObserver: ResizeObserver;
 
   constructor(container: HTMLElement, uri: string) {
@@ -26,8 +33,11 @@ export class MP4Player {
     this.container = container;
     this.container.appendChild(this.canvas);
 
-    this.codedWidth = 0;
-    this.codedHeight = 0;
+    this.originalWidth = 0;
+    this.originalHeight = 0;
+
+    this.metadata = null;
+    this.config = null;
 
     this.resizeObserver = this.setupResizeObserver();
     this.worker = new Worker(new URL("./worker.ts", import.meta.url));
@@ -50,40 +60,40 @@ export class MP4Player {
     );
   }
 
-  private handleCanvasResize(codecWidth: number, codecHeight: number) {
+  private handleCanvasResize(originalWidth: number, originalHeight: number) {
     const containerRect = this.container.getBoundingClientRect();
     const containerWidth = containerRect.width;
     const containerHeight = containerRect.height;
 
-    const videoAspectRatio = codecWidth / codecHeight;
+    const videoAspectRatio = originalWidth / originalHeight;
     const containerAspectRatio = containerWidth / containerHeight;
 
-    let newWidth: number;
-    let newHeight: number;
+    let width: number;
+    let height: number;
 
     if (containerAspectRatio > videoAspectRatio) {
-      newHeight = containerHeight;
-      newWidth = containerHeight * videoAspectRatio;
+      height = containerHeight;
+      width = containerHeight * videoAspectRatio;
     } else {
-      newWidth = containerWidth;
-      newHeight = containerWidth / videoAspectRatio;
+      width = containerWidth;
+      height = containerWidth / videoAspectRatio;
     }
 
-    newWidth = Math.floor(newWidth / 2) * 2;
-    newHeight = Math.floor(newHeight / 2) * 2;
+    width = Math.floor(width / 2) * 2;
+    height = Math.floor(height / 2) * 2;
 
-    this.canvas.style.width = `${newWidth}px`;
-    this.canvas.style.height = `${newHeight}px`;
+    this.canvas.style.width = width + "px";
+    this.canvas.style.height = height + "px";
 
-    this.codedWidth = codecWidth;
-    this.codedHeight = codecHeight;
+    this.originalWidth = originalWidth;
+    this.originalHeight = originalHeight;
   }
 
   private setupResizeObserver() {
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        if (entry.target === this.container && this.codedWidth && this.codedHeight) {
-          this.handleCanvasResize(this.codedWidth, this.codedHeight);
+        if (entry.target === this.container && this.originalWidth && this.originalHeight) {
+          this.handleCanvasResize(this.originalWidth, this.originalHeight);
           break;
         }
       }
@@ -104,56 +114,54 @@ export class MP4Player {
         break;
 
       case VideoPlayerEvents.VideoConfig:
-        const config = event.data.payload as VideoDecoderConfig;
-        this.handleCanvasResize(this.codedWidth, this.codedHeight);
-        console.log("MP4 player worker config:", config);
+        this.config = event.data.payload as VideoDecoderConfig;
+        this.handleCanvasResize(this.config.codedWidth || 0, this.config.codedHeight || 0);
+        console.log("MP4 player worker config:", this.config);
         break;
 
-      case VideoPlayerEvents.PlayVideoSuccess:
-        console.log("MP4 player worker is playing");
-        this.playback = "playing";
-        break;
-
-      case VideoPlayerEvents.PlayVideoError:
-        console.log("MP4 player worker error");
-        break;
-
-      case VideoPlayerEvents.SeekVideoSuccess:
-        console.log("MP4 player worker is seeking");
-        break;
-
-      case VideoPlayerEvents.SeekVideoError:
-        console.log("MP4 player worker error");
-        break;
-
-      case VideoPlayerEvents.PauseVideoSuccess:
-        console.log("MP4 player worker is paused");
-        this.playback = "paused";
-        break;
-
-      case VideoPlayerEvents.PauseVideoError:
-        console.log("MP4 player worker error");
+      case VideoPlayerEvents.VideoMetadata:
+        this.metadata = event.data.payload as MP4FileMetadata;
+        console.log("MP4 player worker metadata:", this.metadata);
         break;
     }
   }
 
-  play() {
+  async play() {
     this.worker.postMessage({ type: VideoPlayerEvents.PlayVideo });
+    await waitUnitWorkerEvent(this.worker, {
+      success: VideoPlayerEvents.PlayVideoSuccess,
+      error: VideoPlayerEvents.PlayVideoError,
+    });
+    this.playback = "playing";
   }
 
-  pause() {
-    this.worker.postMessage({ type: VideoPlayerEvents.PauseVideo });
-  }
-
-  seek(type: "frame" | "time", value: number) {
+  async seek(type: "frame" | "time", value: number) {
     this.worker.postMessage({ type: VideoPlayerEvents.SeekVideo, payload: { type, value } });
+    await waitUnitWorkerEvent(this.worker, {
+      success: VideoPlayerEvents.SeekVideoSuccess,
+      error: VideoPlayerEvents.SeekVideoError,
+    });
   }
 
-  setPlaybackSpeed(speed: number) {
+  async pause() {
+    this.worker.postMessage({ type: VideoPlayerEvents.PauseVideo });
+    await waitUnitWorkerEvent(this.worker, {
+      success: VideoPlayerEvents.PauseVideoSuccess,
+      error: VideoPlayerEvents.PauseVideoError,
+    });
+    this.playback = "paused";
+  }
+
+  async setPlaybackSpeed(speed: number) {
     this.worker.postMessage({ type: VideoPlayerEvents.PlaybackSpeed, payload: { speed } });
+    await waitUnitWorkerEvent(this.worker, {
+      success: VideoPlayerEvents.PlaybackSpeedSuccess,
+      error: VideoPlayerEvents.PlaybackSpeedError,
+    });
   }
 
-  destroy() {
+  async destroy() {
     this.resizeObserver.disconnect();
+    this.worker.terminate();
   }
 }
