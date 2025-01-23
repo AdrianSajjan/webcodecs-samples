@@ -8,8 +8,10 @@ type PlaybackStatus = "playing" | "paused" | "ended" | "idle";
 class MP4Worker {
   uri!: string;
   status: Status;
-  seeking: boolean;
   canvas!: OffscreenCanvas;
+
+  seeking: boolean;
+  seekResolver!: PromiseWithResolvers<void>;
 
   speed: number;
   frameIndex: number;
@@ -95,10 +97,11 @@ class MP4Worker {
   }
 
   handleDecoderOutput(frame: VideoFrame) {
-    if (!this.seeking) {
-      this.renderFrame(frame);
-    } else {
+    if (this.seeking) {
+      this.seekResolver.resolve();
       frame.close();
+    } else {
+      this.handleRenderFrame(frame);
     }
   }
 
@@ -107,7 +110,7 @@ class MP4Worker {
     this.handleUpdateStatus("error");
   }
 
-  renderFrame(frame: VideoFrame) {
+  handleRenderFrame(frame: VideoFrame) {
     if (!this.pendingFrame) {
       requestAnimationFrame(this.renderAnimationFrame.bind(this));
     } else {
@@ -205,7 +208,7 @@ class MP4Worker {
     if (this.playback === "playing") this.handlePlayInterval();
   }
 
-  handleSeek(_: "frame" | "time", value: number) {
+  async handleSeek(_: "frame" | "time", value: number) {
     const playing = this.playback === "playing";
     if (playing) this.handlePause();
 
@@ -226,31 +229,34 @@ class MP4Worker {
     if (chunk.type === "key") {
       this.seeking = false;
       this.decoder.decode(chunk);
-      return;
+    } else {
+      const result = this.handleFindClosestKeyFrame(frame);
+      if (!result.chunk) {
+        import("@/types/events").then(({ RuntimeEvents }) =>
+          self.postMessage({
+            type: RuntimeEvents.SeekVideoError,
+            payload: { error: "No key frame found" },
+          })
+        );
+        return;
+      }
+
+      let index = result.index;
+
+      while (index < frame) {
+        const chunk = this.chunks[index];
+        if (chunk) {
+          this.seekResolver = Promise.withResolvers();
+          this.decoder.decode(chunk);
+          await this.seekResolver.promise;
+        }
+        index++;
+      }
+
+      this.seeking = false;
+      this.frameIndex = frame;
+      this.decoder.decode(chunk);
     }
-
-    const result = this.handleFindClosestKeyFrame(frame);
-    if (!result.chunk) {
-      import("@/types/events").then(({ RuntimeEvents }) =>
-        self.postMessage({
-          type: RuntimeEvents.SeekVideoError,
-          payload: { error: "No key frame found" },
-        })
-      );
-      return;
-    }
-
-    let index = result.index;
-
-    while (index < frame) {
-      const chunk = this.chunks[index];
-      if (chunk) this.decoder.decode(chunk);
-      index++;
-    }
-
-    this.seeking = false;
-    this.frameIndex = frame;
-    this.decoder.decode(chunk);
 
     if (playing) this.handlePlayInterval();
     import("@/types/events").then(({ RuntimeEvents }) => self.postMessage({ type: RuntimeEvents.SeekVideoSuccess }));
