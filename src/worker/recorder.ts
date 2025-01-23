@@ -1,5 +1,5 @@
 import type { RuntimeMessage } from "@/types/events";
-import { RecorderCaptureProps } from "@/packages/base-recorder";
+import type { RecorderCaptureProps } from "@/packages/base-recorder";
 
 async function setupWorker() {
   const { RuntimeEvents } = await import("@/types/events");
