@@ -30,7 +30,7 @@ export class ScreenRecorder {
     this.video = video;
     this.recording = false;
     this.capturing = false;
-    this.worker = new Worker(new URL("../worker/recorder.ts", import.meta.url));
+    this.worker = new Worker(new URL("./worker.ts", import.meta.url));
     this.handleSetupWorker();
   }
 

@@ -6,6 +6,6 @@ export function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function html(template: TemplateStringsArray) {
-  return template;
+export function html(template: TemplateStringsArray): string {
+  return template.raw.join("");
 }

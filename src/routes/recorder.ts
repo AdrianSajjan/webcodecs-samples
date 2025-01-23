@@ -1,6 +1,18 @@
+import { html } from "@/shared/libs/utils";
 import { ScreenRecorder } from "@/features/screen-recorder/recorder";
 
-export function handleSetupScreenRecorder() {
+export const Page = html`
+  <section id="recorder">
+    <div>
+      <button id="capture">Capture</button>
+      <button id="record">Record</button>
+      <button id="save">Save</button>
+    </div>
+    <video id="video" playsinline muted></video>
+  </section>
+`;
+
+export function Script() {
   if (!window.VideoEncoder || !window.VideoEncoder) {
     return alert("Your browser does not support webcodecs API yet.");
   }
