@@ -5,3 +5,7 @@ export function assert<T>(value?: T | null): asserts value is T {
 export function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+export function html(template: TemplateStringsArray) {
+  return template;
+}

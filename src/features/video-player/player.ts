@@ -1,4 +1,5 @@
-import { RuntimeEvents, RuntimeMessage } from "@/types/events";
+import { VideoPlayerEvents } from "./constants/events";
+import type { RuntimeMessage } from "@/shared/types/events";
 
 type Status = "idle" | "pending" | "ready" | "error";
 type PlaybackState = "playing" | "paused" | "ended";
@@ -29,7 +30,7 @@ export class MP4Player {
     this.codedHeight = 0;
 
     this.resizeObserver = this.setupResizeObserver();
-    this.worker = new Worker(new URL("../worker/mp4-player.ts", import.meta.url));
+    this.worker = new Worker(new URL("./worker.ts", import.meta.url));
     this.handleSetupWorker();
   }
 
@@ -42,7 +43,7 @@ export class MP4Player {
     this.worker.addEventListener("message", this.handleWorkerMessage.bind(this));
     this.worker.postMessage(
       {
-        type: RuntimeEvents.SetupWorker,
+        type: VideoPlayerEvents.SetupWorker,
         payload: { uri: this.uri, canvas },
       },
       [canvas]
@@ -93,63 +94,63 @@ export class MP4Player {
 
   private handleWorkerMessage(event: MessageEvent<RuntimeMessage>) {
     switch (event.data.type) {
-      case RuntimeEvents.SetupWorkerSuccess:
+      case VideoPlayerEvents.SetupWorkerSuccess:
         console.log("MP4 player worker thread is ready");
         break;
 
-      case RuntimeEvents.MP4WorkerStatus:
+      case VideoPlayerEvents.VideoStatus:
         this.status = event.data.payload as Status;
         console.log("MP4 player worker status:", this.status);
         break;
 
-      case RuntimeEvents.MP4WorkerConfig:
+      case VideoPlayerEvents.VideoConfig:
         const config = event.data.payload as VideoDecoderConfig;
         this.handleCanvasResize(this.codedWidth, this.codedHeight);
         console.log("MP4 player worker config:", config);
         break;
 
-      case RuntimeEvents.PlayVideoSuccess:
+      case VideoPlayerEvents.PlayVideoSuccess:
         console.log("MP4 player worker is playing");
         this.playback = "playing";
         break;
 
-      case RuntimeEvents.PlayVideoError:
+      case VideoPlayerEvents.PlayVideoError:
         console.log("MP4 player worker error");
         break;
 
-      case RuntimeEvents.SeekVideoSuccess:
+      case VideoPlayerEvents.SeekVideoSuccess:
         console.log("MP4 player worker is seeking");
         break;
 
-      case RuntimeEvents.SeekVideoError:
+      case VideoPlayerEvents.SeekVideoError:
         console.log("MP4 player worker error");
         break;
 
-      case RuntimeEvents.PauseVideoSuccess:
+      case VideoPlayerEvents.PauseVideoSuccess:
         console.log("MP4 player worker is paused");
         this.playback = "paused";
         break;
 
-      case RuntimeEvents.PauseVideoError:
+      case VideoPlayerEvents.PauseVideoError:
         console.log("MP4 player worker error");
         break;
     }
   }
 
   play() {
-    this.worker.postMessage({ type: RuntimeEvents.PlayVideo });
+    this.worker.postMessage({ type: VideoPlayerEvents.PlayVideo });
   }
 
   pause() {
-    this.worker.postMessage({ type: RuntimeEvents.PauseVideo });
+    this.worker.postMessage({ type: VideoPlayerEvents.PauseVideo });
   }
 
   seek(type: "frame" | "time", value: number) {
-    this.worker.postMessage({ type: RuntimeEvents.SeekVideo, payload: { type, value } });
+    this.worker.postMessage({ type: VideoPlayerEvents.SeekVideo, payload: { type, value } });
   }
 
   setPlaybackSpeed(speed: number) {
-    this.worker.postMessage({ type: RuntimeEvents.PlaybackSpeed, payload: { speed } });
+    this.worker.postMessage({ type: VideoPlayerEvents.PlaybackSpeed, payload: { speed } });
   }
 
   destroy() {

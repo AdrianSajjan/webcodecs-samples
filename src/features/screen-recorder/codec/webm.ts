@@ -1,5 +1,5 @@
 import * as MuxerWebM from "webm-muxer";
-import { BaseRecorder, BaseRecorderInit } from "@/packages/base-recorder";
+import { BaseRecorder, BaseRecorderInit } from "./base";
 
 export class WebMRecorder extends BaseRecorder<MuxerWebM.Muxer<MuxerWebM.ArrayBufferTarget>> {
   protected override readonly mAudioEncoderCodec = "opus";

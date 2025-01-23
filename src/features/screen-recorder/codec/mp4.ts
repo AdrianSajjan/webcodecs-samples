@@ -1,5 +1,5 @@
 import * as MuxerMP4 from "mp4-muxer";
-import { BaseRecorder, BaseRecorderInit } from "@/packages/base-recorder";
+import { BaseRecorder, BaseRecorderInit } from "./base";
 
 export class MP4Recorder extends BaseRecorder<MuxerMP4.Muxer<MuxerMP4.ArrayBufferTarget>> {
   protected override readonly mAudioEncoderCodec = "mp4a.40.2";

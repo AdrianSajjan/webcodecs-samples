@@ -1,6 +1,6 @@
 import * as MuxerMP4 from "mp4-muxer";
 import * as MuxerWebM from "webm-muxer";
-import { assert } from "@/libs/utils";
+import { assert } from "@/shared/libs/utils";
 
 export type Muxer = MuxerMP4.Muxer<MuxerMP4.ArrayBufferTarget> | MuxerWebM.Muxer<MuxerWebM.ArrayBufferTarget>;
 export interface BaseRecorderInit {

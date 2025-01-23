@@ -1,6 +1,6 @@
-import type { MP4Demuxer, MP4FileMetadata } from "@/packages/mp4-demuxer";
-import type { RuntimeMessage } from "@/types/events";
-import type { Renderer } from "@/types/player";
+import type { RuntimeMessage } from "@/shared/types/events";
+import type { MP4Demuxer, MP4FileMetadata } from "./demuxer";
+import type { Renderer } from "./interfaces/player";
 
 type Status = "idle" | "pending" | "ready" | "error";
 type PlaybackStatus = "playing" | "paused" | "ended" | "idle";
@@ -48,9 +48,10 @@ class MP4Worker {
   }
 
   async handleWorkerMessage(event: MessageEvent<RuntimeMessage>) {
-    const { RuntimeEvents } = await import("@/types/events");
+    const { VideoPlayerEvents } = await import("./constants/events");
+
     switch (event.data.type) {
-      case RuntimeEvents.SetupWorker: {
+      case VideoPlayerEvents.SetupWorker: {
         this.uri = event.data.payload.uri;
         this.canvas = event.data.payload.canvas;
 
@@ -58,26 +59,26 @@ class MP4Worker {
         await this.handleSetupRenderer();
         await this.handleSetupDemuxer();
 
-        self.postMessage({ type: RuntimeEvents.SetupWorkerSuccess });
+        self.postMessage({ type: VideoPlayerEvents.SetupWorkerSuccess });
         break;
       }
 
-      case RuntimeEvents.PlayVideo: {
+      case VideoPlayerEvents.PlayVideo: {
         this.handlePlay();
         break;
       }
 
-      case RuntimeEvents.PauseVideo: {
+      case VideoPlayerEvents.PauseVideo: {
         this.handlePause();
         break;
       }
 
-      case RuntimeEvents.PlaybackSpeed: {
+      case VideoPlayerEvents.PlaybackSpeed: {
         this.handlePlaybackSpeed(event.data.payload.speed);
         break;
       }
 
-      case RuntimeEvents.SeekVideo: {
+      case VideoPlayerEvents.SeekVideo: {
         this.handleSeek(event.data.payload.type, event.data.payload.value);
         break;
       }
@@ -85,7 +86,7 @@ class MP4Worker {
   }
 
   async handleSetupRenderer() {
-    const { Canvas2DRenderer } = await import("@/packages/2d-render");
+    const { Canvas2DRenderer } = await import("./renderer/2d");
     this.renderer = Canvas2DRenderer.createInstance(this.canvas);
   }
 
@@ -127,13 +128,13 @@ class MP4Worker {
   }
 
   async handleUpdateStatus(status: Status) {
-    const { RuntimeEvents } = await import("@/types/events");
+    const { VideoPlayerEvents } = await import("./constants/events");
     this.status = status;
-    self.postMessage({ type: RuntimeEvents.MP4WorkerStatus, payload: { status: this.status } });
+    self.postMessage({ type: VideoPlayerEvents.VideoStatus, payload: { status: this.status } });
   }
 
   async handleSetupDemuxer() {
-    const { MP4Demuxer } = await import("@/packages/mp4-demuxer");
+    const { MP4Demuxer } = await import("./demuxer");
 
     this.demuxer = MP4Demuxer.createInstance(this.uri, {
       onConfig: this.handleDemuxerConfig.bind(this),
@@ -143,8 +144,8 @@ class MP4Worker {
   }
 
   handleDemuxerConfig(config: VideoDecoderConfig) {
-    import("@/types/events").then(({ RuntimeEvents }) =>
-      self.postMessage({ type: RuntimeEvents.MP4WorkerConfig, payload: { config } })
+    import("./constants/events").then(({ VideoPlayerEvents }) =>
+      self.postMessage({ type: VideoPlayerEvents.VideoConfig, payload: { config } })
     );
     this.decoder.configure(config);
   }
@@ -158,9 +159,9 @@ class MP4Worker {
     if (this.playback === "playing") return;
 
     if (this.chunks.length === 0) {
-      import("@/types/events").then(({ RuntimeEvents }) =>
+      import("./constants/events").then(({ VideoPlayerEvents }) =>
         self.postMessage({
-          type: RuntimeEvents.PlayVideoError,
+          type: VideoPlayerEvents.PlayVideoError,
           payload: { error: "Please wait for the video to load" },
         })
       );
@@ -171,7 +172,9 @@ class MP4Worker {
     if (this.frameIndex === this.metadata?.frames) this.frameIndex = 0;
     this.handlePlayInterval();
 
-    import("@/types/events").then(({ RuntimeEvents }) => self.postMessage({ type: RuntimeEvents.PlayVideoSuccess }));
+    import("./constants/events").then(({ VideoPlayerEvents }) =>
+      self.postMessage({ type: VideoPlayerEvents.PlayVideoSuccess })
+    );
   }
 
   handlePlayInterval() {
@@ -199,7 +202,9 @@ class MP4Worker {
       this.intervalId = null;
     }
 
-    import("@/types/events").then(({ RuntimeEvents }) => self.postMessage({ type: RuntimeEvents.PauseVideoSuccess }));
+    import("./constants/events").then(({ VideoPlayerEvents }) =>
+      self.postMessage({ type: VideoPlayerEvents.PauseVideoSuccess })
+    );
   }
 
   handlePlaybackSpeed(speed: number) {
@@ -217,9 +222,9 @@ class MP4Worker {
     const chunk = this.chunks[frame];
 
     if (!chunk) {
-      import("@/types/events").then(({ RuntimeEvents }) =>
+      import("./constants/events").then(({ VideoPlayerEvents }) =>
         self.postMessage({
-          type: RuntimeEvents.SeekVideoError,
+          type: VideoPlayerEvents.SeekVideoError,
           payload: { error: "No chunk found" },
         })
       );
@@ -232,9 +237,9 @@ class MP4Worker {
     } else {
       const result = this.handleFindClosestKeyFrame(frame);
       if (!result.chunk) {
-        import("@/types/events").then(({ RuntimeEvents }) =>
+        import("./constants/events").then(({ VideoPlayerEvents }) =>
           self.postMessage({
-            type: RuntimeEvents.SeekVideoError,
+            type: VideoPlayerEvents.SeekVideoError,
             payload: { error: "No key frame found" },
           })
         );
@@ -259,7 +264,9 @@ class MP4Worker {
     }
 
     if (playing) this.handlePlayInterval();
-    import("@/types/events").then(({ RuntimeEvents }) => self.postMessage({ type: RuntimeEvents.SeekVideoSuccess }));
+    import("./constants/events").then(({ VideoPlayerEvents }) =>
+      self.postMessage({ type: VideoPlayerEvents.SeekVideoSuccess })
+    );
   }
 
   handleFindClosestKeyFrame(index: number) {
@@ -271,8 +278,8 @@ class MP4Worker {
   }
 
   handleDemuxerMetadata(metadata: MP4FileMetadata) {
-    import("@/types/events").then(({ RuntimeEvents }) =>
-      self.postMessage({ type: RuntimeEvents.MP4WorkerMetadata, payload: { metadata } })
+    import("./constants/events").then(({ VideoPlayerEvents }) =>
+      self.postMessage({ type: VideoPlayerEvents.VideoMetadata, payload: { metadata } })
     );
     this.metadata = metadata;
     this.frameInterval = 1000 / this.metadata.fps;

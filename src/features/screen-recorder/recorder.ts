@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
-import { assert, wait } from "@/libs/utils";
-import { RuntimeEvents, RuntimeMessage } from "@/types/events";
+import { assert, wait } from "@/shared/libs/utils";
+import type { RuntimeMessage } from "@/shared/types/events";
+import { ScreenRecorderEvents } from "./constants/events";
 
 const mSampleRate = 48000;
 
@@ -47,30 +48,30 @@ export class ScreenRecorder {
 
   private handleSetupWorker() {
     this.worker.addEventListener("message", this.runtimeMessageHandler);
-    this.worker.postMessage({ type: RuntimeEvents.SetupWorker });
+    this.worker.postMessage({ type: ScreenRecorderEvents.SetupWorker });
   }
 
   private handleRuntimeMessage({ data }: MessageEvent<RuntimeMessage>) {
     switch (data.type) {
-      case RuntimeEvents.SetupWorkerSuccess:
+      case ScreenRecorderEvents.SetupWorkerSuccess:
         console.log("Recording worker thread is ready");
         break;
-      case RuntimeEvents.SetupWorkerError:
+      case ScreenRecorderEvents.SetupWorkerError:
         console.error(data.payload.error);
         break;
 
-      case RuntimeEvents.CaptureStreamSuccess:
+      case ScreenRecorderEvents.CaptureStreamSuccess:
         this.captureStreamResolver?.resolve();
         break;
-      case RuntimeEvents.CaptureStreamError:
+      case ScreenRecorderEvents.CaptureStreamError:
         this.captureStreamResolver?.reject(data.payload.error);
         break;
 
-      case RuntimeEvents.SaveStreamSuccess:
+      case ScreenRecorderEvents.SaveStreamSuccess:
         console.log("Save stream success", data.payload);
         this.releaseStreamResolver?.resolve(data.payload);
         break;
-      case RuntimeEvents.SaveStreamError:
+      case ScreenRecorderEvents.SaveStreamError:
         this.releaseStreamResolver?.reject(data.payload.error);
         break;
     }
@@ -100,7 +101,7 @@ export class ScreenRecorder {
     if (!this.audioTrack) {
       this.worker.postMessage(
         {
-          type: RuntimeEvents.CaptureStream,
+          type: ScreenRecorderEvents.CaptureStream,
           payload: { videoTrackSettings, videoReadableStream },
         },
         [videoReadableStream]
@@ -113,7 +114,7 @@ export class ScreenRecorder {
 
     this.worker.postMessage(
       {
-        type: RuntimeEvents.CaptureStream,
+        type: ScreenRecorderEvents.CaptureStream,
         payload: { videoTrackSettings, videoReadableStream, audioTrackSettings, audioReadableStream },
       },
       [videoReadableStream, audioReadableStream]
@@ -154,7 +155,7 @@ export class ScreenRecorder {
     if (!this.capturing) return;
 
     this.recording = true;
-    this.worker.postMessage({ type: RuntimeEvents.RecordStream });
+    this.worker.postMessage({ type: ScreenRecorderEvents.RecordStream });
   }
 
   async handleSaveStream() {
@@ -162,7 +163,7 @@ export class ScreenRecorder {
 
     this.recording = false;
     this.releaseStreamResolver = Promise.withResolvers();
-    this.worker.postMessage({ type: RuntimeEvents.SaveStream });
+    this.worker.postMessage({ type: ScreenRecorderEvents.SaveStream });
 
     assert(this.desktopStream);
     this.desktopStream.getTracks().forEach((track) => track.stop());
