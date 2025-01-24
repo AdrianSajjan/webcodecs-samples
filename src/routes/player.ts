@@ -14,6 +14,7 @@ export const Page = html`
         <option value="0.25">0.25</option>
       </select>
       <button id="play">Play</button>
+      <button id="play-reverse">Reverse</button>
       <button id="pause">Pause</button>
     </div>
     <div class="player-seek">
@@ -41,4 +42,7 @@ export function Script() {
   const seekFrameInput = document.getElementById("seek-frame-input") as HTMLInputElement;
   const seekFrameButton = document.getElementById("seek-frame-button") as HTMLButtonElement;
   seekFrameButton.addEventListener("click", () => mp4Player.seek("frame", Number(seekFrameInput.value)));
+
+  const playReverseButton = document.getElementById("play-reverse") as HTMLButtonElement;
+  playReverseButton.addEventListener("click", () => mp4Player.reverse());
 }

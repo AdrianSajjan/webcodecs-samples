@@ -135,6 +135,15 @@ export class MP4Player {
     this.playback = "playing";
   }
 
+  async reverse() {
+    this.worker.postMessage({ type: VideoPlayerEvents.PlayVideoReverse });
+    await waitUnitWorkerEvent(this.worker, {
+      success: VideoPlayerEvents.PlayVideoReverseSuccess,
+      error: VideoPlayerEvents.PlayVideoReverseError,
+    });
+    this.playback = "playing";
+  }
+
   async seek(type: "frame" | "time", value: number) {
     this.worker.postMessage({ type: VideoPlayerEvents.SeekVideo, payload: { type, value } });
     await waitUnitWorkerEvent(this.worker, {

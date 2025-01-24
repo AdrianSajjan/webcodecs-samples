@@ -14,6 +14,10 @@ export enum VideoPlayerEvents {
   PlayVideoSuccess = "play.video.success",
   PlayVideoError = "play.video.error",
 
+  PlayVideoReverse = "play.video.reverse",
+  PlayVideoReverseSuccess = "play.video.reverse.success",
+  PlayVideoReverseError = "play.video.reverse.error",
+
   PauseVideo = "pause.video",
   PauseVideoSuccess = "pause.video.success",
   PauseVideoError = "pause.video.error",
