@@ -43,7 +43,7 @@ export function Script() {
   const seekFrameButton = document.getElementById("seek-frame-button") as HTMLButtonElement;
 
   let url = "/videos/sample.mp4";
-  let mp4Player = MP4Player.createInstance(container, url);
+  let mp4Player = MP4Player.createInstance(url, container);
 
   fileInput.addEventListener("change", () => {
     const file = fileInput.files?.item(0);
@@ -52,7 +52,7 @@ export function Script() {
       url = URL.createObjectURL(file);
 
       if (mp4Player) mp4Player.destroy();
-      mp4Player = MP4Player.createInstance(container, url);
+      mp4Player = MP4Player.createInstance(url, container);
     }
   });
 

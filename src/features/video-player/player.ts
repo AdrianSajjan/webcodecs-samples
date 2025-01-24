@@ -1,18 +1,17 @@
-import type { RuntimeMessage } from "@/shared/types/events";
+import { RuntimeMessage } from "@/shared/types/events";
 import { waitUnitWorkerEvent } from "@/shared/libs/utils";
 
-import { VideoPlayerEvents } from "./constants/events";
 import { MP4FileMetadata } from "./demuxer";
+import { VideoPlayerEvents } from "./constants/events";
+import { VideoPlayerStatus, VideoPlayerPlaybackState } from "./interfaces/player";
 
-type Status = "idle" | "pending" | "ready" | "error";
-
-type PlaybackState = "playing" | "paused" | "ended";
-
-export class MP4Player {
-  status: Status;
-  playback: PlaybackState;
-
+export class MP4Player extends EventTarget {
+  status: VideoPlayerStatus;
+  playback: VideoPlayerPlaybackState;
   uri: string;
+
+  currentTime: number;
+  currentFrame: number;
   originalWidth: number;
   originalHeight: number;
 
@@ -23,25 +22,31 @@ export class MP4Player {
   canvas: HTMLCanvasElement;
 
   container?: HTMLElement;
-  resizeObserver?: ResizeObserver;
+  resize?: ResizeObserver;
 
   constructor(uri: string, container?: HTMLElement) {
+    super();
+
     this.uri = uri;
     this.status = "idle";
     this.playback = "paused";
 
-    this.canvas = document.createElement("canvas");
-    this.container = container;
-    this.container?.appendChild(this.canvas);
-
-    this.originalWidth = 0;
-    this.originalHeight = 0;
-
+    this.currentTime = 0;
+    this.currentFrame = 0;
     this.metadata = null;
     this.config = null;
 
-    this.resizeObserver = this.setupResizeObserver();
-    this.worker = new Worker(new URL("./worker.ts", import.meta.url));
+    this.originalWidth = 0;
+    this.originalHeight = 0;
+    this.canvas = document.createElement("canvas");
+
+    if (container) {
+      this.container = container;
+      this.container.appendChild(this.canvas);
+    }
+
+    this.resize = this.setupResizeObserver();
+    this.worker = this.handleCreateWorker();
     this.handleSetupWorker();
   }
 
@@ -49,16 +54,16 @@ export class MP4Player {
     return new MP4Player(uri, container);
   }
 
+  private handleCreateWorker() {
+    const url = new URL("./worker.ts", import.meta.url);
+    const worker = new Worker(url);
+    return worker;
+  }
+
   private handleSetupWorker() {
     const canvas = this.canvas.transferControlToOffscreen();
     this.worker.addEventListener("message", this.handleWorkerMessage.bind(this));
-    this.worker.postMessage(
-      {
-        type: VideoPlayerEvents.SetupWorker,
-        payload: { uri: this.uri, canvas },
-      },
-      [canvas]
-    );
+    this.worker.postMessage({ type: VideoPlayerEvents.SetupWorker, payload: { uri: this.uri, canvas } }, [canvas]);
   }
 
   private handleCanvasResize(originalWidth: number, originalHeight: number) {
@@ -114,32 +119,40 @@ export class MP4Player {
         break;
 
       case VideoPlayerEvents.VideoStatus:
-        this.status = event.data.payload as Status;
+        this.status = event.data.payload as VideoPlayerStatus;
+        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.VideoStatus, { detail: this.status }));
         console.log("MP4 player status:", this.status);
         break;
 
       case VideoPlayerEvents.VideoConfig:
         this.config = event.data.payload as VideoDecoderConfig;
         this.handleCanvasResize(this.config.codedWidth || 0, this.config.codedHeight || 0);
+        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.VideoConfig, { detail: this.config }));
         console.log("MP4 player config:", this.config);
         break;
 
       case VideoPlayerEvents.VideoMetadata:
         this.metadata = event.data.payload as MP4FileMetadata;
+        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.VideoMetadata, { detail: this.metadata }));
         console.log("MP4 player metadata:", this.metadata);
         break;
 
       case VideoPlayerEvents.VideoEnded:
         this.playback = "ended";
+        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.VideoEnded));
         console.log("MP4 player ended");
         break;
 
       case VideoPlayerEvents.FrameUpdated:
-        console.log("MP4 player frame updated:", event.data.payload.frame);
+        this.currentFrame = event.data.payload.frame;
+        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.FrameUpdated, { detail: this.currentFrame }));
+        console.log("MP4 player frame updated:", this.currentFrame);
         break;
 
       case VideoPlayerEvents.TimeUpdated:
-        console.log("MP4 player time updated:", event.data.payload.time);
+        this.currentTime = event.data.payload.time;
+        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.TimeUpdated, { detail: this.currentTime }));
+        console.log("MP4 player time updated:", this.currentTime);
         break;
     }
   }
@@ -198,6 +211,6 @@ export class MP4Player {
   async destroy() {
     this.canvas.remove();
     this.worker.terminate();
-    this.resizeObserver?.disconnect();
+    this.resize?.disconnect();
   }
 }

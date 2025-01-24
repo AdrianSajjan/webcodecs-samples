@@ -1,6 +1,6 @@
 import type { RuntimeMessage } from "@/shared/types/events";
 import type { MP4Demuxer, MP4FileMetadata } from "./demuxer";
-import type { Renderer } from "./interfaces/player";
+import type { Renderer } from "./interfaces/renderer";
 
 type Status = "idle" | "pending" | "ready" | "error";
 type PlaybackStatus = "playing" | "paused" | "ended" | "idle";

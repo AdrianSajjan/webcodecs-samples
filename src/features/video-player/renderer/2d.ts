@@ -1,4 +1,4 @@
-import type { Renderer } from "../interfaces/player";
+import type { Renderer } from "../interfaces/renderer";
 
 export class Canvas2DRenderer implements Renderer {
   canvas: HTMLCanvasElement | OffscreenCanvas;

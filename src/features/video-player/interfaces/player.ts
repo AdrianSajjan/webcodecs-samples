@@ -1,6 +1,3 @@
-export interface Renderer {
-  canvas: HTMLCanvasElement | OffscreenCanvas;
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+export type VideoPlayerStatus = "idle" | "pending" | "ready" | "error";
 
-  draw(frame: VideoFrame): void;
-}
+export type VideoPlayerPlaybackState = "playing" | "paused" | "ended";
