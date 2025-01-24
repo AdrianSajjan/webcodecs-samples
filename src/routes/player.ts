@@ -64,7 +64,7 @@ export function Script() {
 
   playReverseButton.addEventListener("click", () => mp4Player.reverse());
 
-  speedSelect.addEventListener("change", () => mp4Player.setPlaybackSpeed(Number(speedSelect.value)));
+  speedSelect.addEventListener("change", () => mp4Player.speed(Number(speedSelect.value)));
 
   seekFrameButton.addEventListener("click", () => mp4Player.seek("frame", Number(seekFrameInput.value)));
 

@@ -1,4 +1,3 @@
-import { MP4Player } from "@/features/video-player/player";
 import { html } from "@/shared/libs/utils";
 
 export const Page = html`
@@ -7,10 +6,14 @@ export const Page = html`
       <input type="file" id="video-file" hidden />
       <button id="upload-video" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer">Upload MP4 Video</button>
     </div>
-    <div class="flex gap-2">
+    <div class="flex gap-2 mt-4">
       <input type="file" id="watermark-file" hidden />
       <button id="upload-watermark" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer">Upload Watermark</button>
     </div>
+    <div class="flex gap-2 mt-4">
+      <button id="add-watermark" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer">Process Video</button>
+    </div>
+    <div id="container" class="mt-4"></div>
   </section>
 `;
 

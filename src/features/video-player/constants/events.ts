@@ -30,6 +30,10 @@ export enum VideoPlayerEvents {
   PlaybackSpeedSuccess = "playback.speed.success",
   PlaybackSpeedError = "playback.speed.error",
 
+  NextFrame = "next.frame",
+  NextFrameSuccess = "next.frame.success",
+  NextFrameError = "next.frame.error",
+
   SeekVideo = "seek.video",
   SeekVideoSuccess = "seek.video.success",
   SeekVideoError = "seek.video.error",

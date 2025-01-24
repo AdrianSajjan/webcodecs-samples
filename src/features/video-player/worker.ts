@@ -98,6 +98,11 @@ class MP4Worker {
         this.handleSeek(event.data.payload.type, event.data.payload.value);
         break;
       }
+
+      case VideoPlayerEvents.NextFrame: {
+        this.handlePaintNextFrame();
+        break;
+      }
     }
   }
 
@@ -117,18 +122,16 @@ class MP4Worker {
 
   handleDecoderOutput(frame: VideoFrame) {
     if (this.seeking) {
-      this.seekResolver.resolve();
       frame.close();
     } else {
       this.handleRenderFrame(frame);
       if (this.reverse) {
         this.reverseResolver.resolve();
-      } else {
-        import("./constants/events").then(({ VideoPlayerEvents }) => {
-          self.postMessage({ type: VideoPlayerEvents.FrameUpdated, payload: { frame: this.frameIndex } });
-          self.postMessage({ type: VideoPlayerEvents.TimeUpdated, payload: { time: this.frameIndex / this.metadata.fps } });
-        });
       }
+    }
+
+    if (this.seekResolver) {
+      this.seekResolver.resolve();
     }
   }
 
@@ -273,13 +276,22 @@ class MP4Worker {
       clearInterval(this.intervalId);
     }
 
-    this.intervalId = setInterval(() => {
+    this.intervalId = setInterval(async () => {
       if (this.frameIndex >= this.metadata.frames) {
         this.handleEnded();
       } else {
         const chunk = this.chunks[this.frameIndex];
-        if (chunk) this.decoder.decode(chunk);
+        if (chunk) {
+          this.seekResolver = Promise.withResolvers();
+          this.decoder.decode(chunk);
+          await this.seekResolver.promise;
+        }
         this.frameIndex++;
+
+        import("./constants/events").then(({ VideoPlayerEvents }) => {
+          self.postMessage({ type: VideoPlayerEvents.FrameUpdated, payload: { frame: this.frameIndex } });
+          self.postMessage({ type: VideoPlayerEvents.TimeUpdated, payload: { time: this.frameIndex / this.metadata.fps } });
+        });
       }
     }, this.frameInterval / this.speed);
   }
@@ -296,6 +308,11 @@ class MP4Worker {
         const data = this.imageDatas[this.frameIndex];
         if (data) this.renderer.ctx.putImageData(data, 0, 0);
         this.frameIndex--;
+
+        import("./constants/events").then(({ VideoPlayerEvents }) => {
+          self.postMessage({ type: VideoPlayerEvents.FrameUpdated, payload: { frame: this.frameIndex } });
+          self.postMessage({ type: VideoPlayerEvents.TimeUpdated, payload: { time: this.frameIndex / this.metadata.fps } });
+        });
       }
     }, this.frameInterval / this.speed);
   }
@@ -357,7 +374,9 @@ class MP4Worker {
 
     if (chunk.type === "key") {
       this.seeking = false;
+      this.seekResolver = Promise.withResolvers();
       this.decoder.decode(chunk);
+      await this.seekResolver.promise;
     } else {
       const result = this.handleFindClosestKeyFrame(frame);
       if (!result.chunk) {
@@ -381,7 +400,10 @@ class MP4Worker {
 
       this.seeking = false;
       this.frameIndex = frame;
+
+      this.seekResolver = Promise.withResolvers();
       this.decoder.decode(chunk);
+      await this.seekResolver.promise;
     }
 
     if (playing) {
@@ -389,6 +411,29 @@ class MP4Worker {
     }
 
     import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.SeekVideoSuccess }));
+  }
+
+  async handlePaintNextFrame() {
+    if (this.frameIndex >= this.metadata.frames - 1) {
+      import("./constants/events").then(({ VideoPlayerEvents }) =>
+        self.postMessage({ type: VideoPlayerEvents.NextFrameError, payload: { error: "End of frames reached" } })
+      );
+      return;
+    }
+
+    const chunk = this.chunks[this.frameIndex];
+
+    if (chunk) {
+      this.seekResolver = Promise.withResolvers();
+      this.decoder.decode(chunk);
+      await this.seekResolver.promise;
+    }
+
+    this.frameIndex++;
+
+    import("./constants/events").then(({ VideoPlayerEvents }) =>
+      self.postMessage({ type: VideoPlayerEvents.NextFrameSuccess, payload: { frame: this.frameIndex } })
+    );
   }
 
   handleFindClosestKeyFrame(index: number) {
