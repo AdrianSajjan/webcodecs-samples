@@ -1,22 +1,25 @@
 import { MP4Player } from "../video-player/player";
 
-export class VideoCropper {
-  private readonly player: MP4Player;
-  private readonly canvas: HTMLCanvasElement;
-
+interface Position {
   top: number;
   left: number;
+}
 
+interface Dimension {
   width: number;
   height: number;
+}
+
+export class VideoCropper {
+  private player: MP4Player;
+  private canvas: HTMLCanvasElement;
+
+  position: Position;
+  dimension: Dimension;
 
   constructor(video: string) {
-    this.top = 0;
-    this.left = 0;
-
-    this.width = 0;
-    this.height = 0;
-
+    this.position = { top: 0, left: 0 };
+    this.dimension = { width: 0, height: 0 };
     this.player = MP4Player.createInstance(video);
     this.canvas = document.createElement("canvas");
   }
@@ -25,10 +28,7 @@ export class VideoCropper {
     return new VideoCropper(video);
   }
 
-  crop(top: number, left: number, width: number, height: number) {
-    this.top = top;
-    this.left = left;
-    this.width = width;
-    this.height = height;
+  async process() {
+    await this.player.initialize();
   }
 }

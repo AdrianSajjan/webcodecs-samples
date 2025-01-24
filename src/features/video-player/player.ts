@@ -3,12 +3,15 @@ import { waitUnitWorkerEvent } from "@/shared/libs/utils";
 
 import { MP4FileMetadata } from "./demuxer";
 import { VideoPlayerEvents } from "./constants/events";
-import { VideoPlayerStatus, VideoPlayerPlaybackState } from "./interfaces/player";
+
+import { VideoPlayerEventMap } from "./interfaces/events";
+import { VideoPlayerEvent, VideoPlayerEventListener } from "./interfaces/events";
+import { VideoPlayerStatus, VideoPlayerPlaybackState, VideoPlayerInitializeOptions } from "./interfaces/player";
 
 export class MP4Player extends EventTarget {
   status: VideoPlayerStatus;
-  playback: VideoPlayerPlaybackState;
   uri: string;
+  playback: VideoPlayerPlaybackState;
 
   currentTime: number;
   currentFrame: number;
@@ -21,10 +24,12 @@ export class MP4Player extends EventTarget {
   worker: Worker;
   canvas: HTMLCanvasElement;
 
-  container?: HTMLElement;
   resize?: ResizeObserver;
+  container?: HTMLElement;
+  ready?: PromiseWithResolvers<void>;
+  options?: VideoPlayerInitializeOptions;
 
-  constructor(uri: string, container?: HTMLElement) {
+  constructor(uri: string, container?: HTMLElement, options?: VideoPlayerInitializeOptions) {
     super();
 
     this.uri = uri;
@@ -33,8 +38,10 @@ export class MP4Player extends EventTarget {
 
     this.currentTime = 0;
     this.currentFrame = 0;
+
     this.metadata = null;
     this.config = null;
+    this.options = options;
 
     this.originalWidth = 0;
     this.originalHeight = 0;
@@ -67,34 +74,40 @@ export class MP4Player extends EventTarget {
   }
 
   private handleCanvasResize(originalWidth: number, originalHeight: number) {
-    if (!this.container) return;
-
-    const containerRect = this.container.getBoundingClientRect();
-    const containerWidth = containerRect.width;
-    const containerHeight = containerRect.height;
-
-    const videoAspectRatio = originalWidth / originalHeight;
-    const containerAspectRatio = containerWidth / containerHeight;
-
-    let width: number;
-    let height: number;
-
-    if (containerAspectRatio > videoAspectRatio) {
-      height = containerHeight;
-      width = containerHeight * videoAspectRatio;
-    } else {
-      width = containerWidth;
-      height = containerWidth / videoAspectRatio;
-    }
-
-    width = Math.floor(width / 2) * 2;
-    height = Math.floor(height / 2) * 2;
-
-    this.canvas.style.width = width + "px";
-    this.canvas.style.height = height + "px";
-
     this.originalWidth = originalWidth;
     this.originalHeight = originalHeight;
+
+    if (this.container) {
+      const videoAspectRatio = originalWidth / originalHeight;
+
+      if (this.options?.fluid) {
+        const containerRect = this.container.getBoundingClientRect();
+        const containerWidth = containerRect.width;
+        const containerHeight = containerRect.height;
+        const containerAspectRatio = containerWidth / containerHeight;
+
+        let width: number;
+        let height: number;
+
+        if (containerAspectRatio > videoAspectRatio) {
+          height = containerHeight;
+          width = containerHeight * videoAspectRatio;
+        } else {
+          width = containerWidth;
+          height = containerWidth / videoAspectRatio;
+        }
+
+        width = Math.floor(width / 2) * 2;
+        height = Math.floor(height / 2) * 2;
+
+        this.canvas.style.width = width + "px";
+        this.canvas.style.height = height + "px";
+      } else {
+        this.canvas.style.width = "100%";
+        this.canvas.style.height = "auto";
+        this.canvas.style.aspectRatio = String(videoAspectRatio);
+      }
+    }
   }
 
   private setupResizeObserver() {
@@ -114,47 +127,71 @@ export class MP4Player extends EventTarget {
 
   private handleWorkerMessage(event: MessageEvent<RuntimeMessage>) {
     switch (event.data.type) {
-      case VideoPlayerEvents.SetupWorkerSuccess:
-        console.log("MP4 player worker thread is ready");
-        break;
-
       case VideoPlayerEvents.VideoStatus:
-        this.status = event.data.payload as VideoPlayerStatus;
-        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.VideoStatus, { detail: this.status }));
-        console.log("MP4 player status:", this.status);
+        this.status = event.data.payload.status as VideoPlayerStatus;
+        if (this.status === "ready") this.ready?.resolve();
+        this.emit(VideoPlayerEvents.VideoStatus, this.status);
         break;
 
       case VideoPlayerEvents.VideoConfig:
-        this.config = event.data.payload as VideoDecoderConfig;
+        this.config = event.data.payload.config as VideoDecoderConfig;
         this.handleCanvasResize(this.config.codedWidth || 0, this.config.codedHeight || 0);
-        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.VideoConfig, { detail: this.config }));
-        console.log("MP4 player config:", this.config);
+        this.emit(VideoPlayerEvents.VideoConfig, this.config);
         break;
 
       case VideoPlayerEvents.VideoMetadata:
-        this.metadata = event.data.payload as MP4FileMetadata;
-        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.VideoMetadata, { detail: this.metadata }));
-        console.log("MP4 player metadata:", this.metadata);
+        this.metadata = event.data.payload.metadata as MP4FileMetadata;
+        this.emit(VideoPlayerEvents.VideoMetadata, this.metadata);
         break;
 
       case VideoPlayerEvents.VideoEnded:
         this.playback = "ended";
-        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.VideoEnded));
-        console.log("MP4 player ended");
+        this.emit(VideoPlayerEvents.VideoEnded);
         break;
 
       case VideoPlayerEvents.FrameUpdated:
         this.currentFrame = event.data.payload.frame;
-        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.FrameUpdated, { detail: this.currentFrame }));
-        console.log("MP4 player frame updated:", this.currentFrame);
+        this.emit(VideoPlayerEvents.FrameUpdated, this.currentFrame);
         break;
 
       case VideoPlayerEvents.TimeUpdated:
         this.currentTime = event.data.payload.time;
-        this.dispatchEvent(new CustomEvent(VideoPlayerEvents.TimeUpdated, { detail: this.currentTime }));
-        console.log("MP4 player time updated:", this.currentTime);
+        this.emit(VideoPlayerEvents.TimeUpdated, this.currentTime);
         break;
     }
+  }
+
+  protected emit<T extends keyof VideoPlayerEventMap>(type: T, detail?: VideoPlayerEventMap[T]): void {
+    const event = new CustomEvent(type, { detail, bubbles: false, cancelable: false });
+    this.dispatchEvent(event);
+  }
+
+  // @ts-expect-error
+  addEventListener<T extends keyof VideoPlayerEventMap>(
+    type: T,
+    listener: VideoPlayerEventListener<T>,
+    options?: AddEventListenerOptions
+  ): void {
+    super.addEventListener(type, listener as EventListener, options);
+  }
+
+  // @ts-expect-error
+  removeEventListener<T extends keyof VideoPlayerEventMap>(
+    type: T,
+    listener: VideoPlayerEventListener<T>,
+    options?: EventListenerOptions
+  ): void {
+    super.removeEventListener(type, listener as EventListener, options);
+  }
+
+  dispatchEvent<T extends keyof VideoPlayerEventMap>(event: VideoPlayerEvent<T>): boolean {
+    return super.dispatchEvent(event);
+  }
+
+  async initialize() {
+    if (this.status === "ready") return;
+    this.ready = Promise.withResolvers();
+    await this.ready.promise;
   }
 
   async play() {
