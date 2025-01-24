@@ -1,3 +1,16 @@
+interface FormatTime {
+  hours: number;
+  minutes: number;
+  seconds: number;
+}
+
+interface WaitUnitWorkerEventOptions<P = any, E = any, SE = string, EE = string> {
+  success: SE;
+  error?: EE;
+  onSuccess?: (payload: P) => void;
+  onError?: (error: E) => void;
+}
+
 export function assert<T>(value?: T | null): asserts value is T {
   if (!value) throw new Error("Recorder is not initialized");
 }
@@ -10,11 +23,21 @@ export function html(template: TemplateStringsArray): string {
   return template.raw.join("");
 }
 
-interface WaitUnitWorkerEventOptions<P = any, E = any, SE = string, EE = string> {
-  success: SE;
-  error?: EE;
-  onSuccess?: (payload: P) => void;
-  onError?: (error: E) => void;
+export function extractTime(seconds: number): FormatTime {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remaining = Math.floor(seconds % 60);
+
+  return {
+    hours,
+    minutes,
+    seconds: remaining,
+  };
+}
+
+export function formatTime(seconds: number): string {
+  const time = extractTime(seconds);
+  return `${String(time.hours).padStart(2, "0")}:${String(time.minutes).padStart(2, "0")}:${String(time.seconds).padStart(2, "0")}`;
 }
 
 export function waitUnitWorkerEvent<P = any, E = any, SE = string, EE = string>(

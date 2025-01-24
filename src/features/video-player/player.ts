@@ -123,6 +123,19 @@ export class MP4Player {
         this.metadata = event.data.payload as MP4FileMetadata;
         console.log("MP4 player worker metadata:", this.metadata);
         break;
+
+      case VideoPlayerEvents.VideoEnded:
+        this.playback = "ended";
+        console.log("MP4 player worker ended");
+        break;
+
+      case VideoPlayerEvents.FrameUpdated:
+        console.log("MP4 player worker frame updated:", event.data.payload.frame);
+        break;
+
+      case VideoPlayerEvents.TimeUpdated:
+        console.log("MP4 player worker time updated:", event.data.payload.time);
+        break;
     }
   }
 
@@ -170,6 +183,7 @@ export class MP4Player {
   }
 
   async destroy() {
+    this.canvas.remove();
     this.resizeObserver.disconnect();
     this.worker.terminate();
   }

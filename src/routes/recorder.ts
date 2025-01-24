@@ -2,13 +2,13 @@ import { html } from "@/shared/libs/utils";
 import { ScreenRecorder } from "@/features/screen-recorder/recorder";
 
 export const Page = html`
-  <section id="recorder">
-    <div>
-      <button id="capture">Capture</button>
-      <button id="record">Record</button>
-      <button id="save">Save</button>
+  <section id="recorder" class="flex flex-col items-center justify-center h-screen w-screen">
+    <div class="flex gap-2">
+      <button id="capture" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer">Capture</button>
+      <button id="record" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer">Record</button>
+      <button id="save" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer">Save</button>
     </div>
-    <video id="video" playsinline muted></video>
+    <video id="video" playsinline muted class="mt-10 w-full h-auto max-w-3xl"></video>
   </section>
 `;
 

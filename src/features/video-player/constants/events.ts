@@ -10,6 +10,10 @@ export enum VideoPlayerEvents {
   VideoProgress = "video.loading",
   VideoFrame = "video.frame",
 
+  VideoEnded = "video.ended",
+  FrameUpdated = "frame.updated",
+  TimeUpdated = "time.updated",
+
   PlayVideo = "play.video",
   PlayVideoSuccess = "play.video.success",
   PlayVideoError = "play.video.error",

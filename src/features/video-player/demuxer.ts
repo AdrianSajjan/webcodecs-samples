@@ -100,7 +100,7 @@ export class MP4Demuxer {
           await writer.write(value);
         }
       } finally {
-        // await writer.close();
+        await writer.close();
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error during fetch";
@@ -132,7 +132,9 @@ export class MP4Demuxer {
 
   private onReady(info: MP4Info) {
     this.status = "demuxing";
+
     const track = info.videoTracks[0];
+    const duration = info.duration / info.timescale;
 
     this.onConfig({
       codedWidth: track.video.width,
@@ -142,8 +144,8 @@ export class MP4Demuxer {
     });
 
     this.onMetadata({
-      fps: track.nb_samples / (track.movie_duration / 1000),
-      duration: track.movie_duration / 1000,
+      fps: Math.round(track.nb_samples / duration),
+      duration: duration,
       frames: track.nb_samples,
     });
 

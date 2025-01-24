@@ -32,7 +32,7 @@ class MP4Worker {
   decoder!: VideoDecoder;
 
   renderer!: Renderer;
-  reverseRenderer!: Renderer;
+  offscreen!: Renderer;
 
   static createInstance() {
     return new MP4Worker();
@@ -69,7 +69,6 @@ class MP4Worker {
         this.handleSetupDecoder();
         await this.handleSetupRenderer();
         await this.handleSetupDemuxer();
-        await this.handleSetupReverseRenderer();
 
         self.postMessage({ type: VideoPlayerEvents.SetupWorkerSuccess });
         break;
@@ -104,14 +103,9 @@ class MP4Worker {
 
   async handleSetupRenderer() {
     const { Canvas2DRenderer } = await import("./renderer/2d");
-    this.renderer = Canvas2DRenderer.createInstance(this.canvas);
-  }
-
-  async handleSetupReverseRenderer() {
-    const { Canvas2DRenderer } = await import("./renderer/2d");
-
     const offscreen = new OffscreenCanvas(this.canvas.width, this.canvas.height);
-    this.reverseRenderer = Canvas2DRenderer.createInstance(offscreen, { willReadFrequently: true });
+    this.renderer = Canvas2DRenderer.createInstance(this.canvas);
+    this.offscreen = Canvas2DRenderer.createInstance(offscreen, { willReadFrequently: true });
   }
 
   handleSetupDecoder() {
@@ -127,7 +121,14 @@ class MP4Worker {
       frame.close();
     } else {
       this.handleRenderFrame(frame);
-      if (this.reverse) this.reverseResolver.resolve();
+      if (this.reverse) {
+        this.reverseResolver.resolve();
+      } else {
+        import("./constants/events").then(({ VideoPlayerEvents }) => {
+          self.postMessage({ type: VideoPlayerEvents.FrameUpdated, payload: { frame: this.frameIndex } });
+          self.postMessage({ type: VideoPlayerEvents.TimeUpdated, payload: { time: this.frameIndex / this.metadata.fps } });
+        });
+      }
     }
   }
 
@@ -144,8 +145,8 @@ class MP4Worker {
   renderAnimationFrame() {
     if (this.pendingFrame) {
       if (this.reverse) {
-        this.reverseRenderer.draw(this.pendingFrame);
-        const data = this.reverseRenderer.ctx.getImageData(0, 0, this.reverseRenderer.canvas.width, this.reverseRenderer.canvas.height);
+        this.offscreen.draw(this.pendingFrame);
+        const data = this.offscreen.ctx.getImageData(0, 0, this.offscreen.canvas.width, this.offscreen.canvas.height);
         this.imageDatas[this.reverseFrameIndex] = data;
       } else {
         this.renderer.draw(this.pendingFrame);
@@ -174,7 +175,7 @@ class MP4Worker {
 
   handleDemuxerChunk(chunk: EncodedVideoChunk) {
     this.chunks.push(chunk);
-    if (this.chunks.length === this.metadata?.frames) this.handleUpdateStatus("ready");
+    if (this.chunks.length === this.metadata.frames) this.handleUpdateStatus("ready");
   }
 
   handleDemuxerConfig(config: VideoDecoderConfig) {
@@ -188,6 +189,7 @@ class MP4Worker {
     import("./constants/events").then(({ VideoPlayerEvents }) =>
       self.postMessage({ type: VideoPlayerEvents.VideoMetadata, payload: { metadata } })
     );
+
     this.metadata = metadata;
     this.frameInterval = 1000 / this.metadata.fps;
   }
@@ -203,13 +205,23 @@ class MP4Worker {
       return;
     }
 
-    if (!this.reverse && this.playback === "playing") return;
-    if (this.frameIndex === this.metadata?.frames) this.frameIndex = 0;
+    if (this.playback === "playing") {
+      if (!this.reverse) {
+        import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.PlayVideoSuccess }));
+        return;
+      }
+    }
+
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
 
     this.reverse = false;
     this.playback = "playing";
-    this.handlePlayInterval();
+    this.frameIndex = this.frameIndex === this.metadata.frames - 1 ? 0 : this.frameIndex;
 
+    this.handlePlayInterval();
     import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.PlayVideoSuccess }));
   }
 
@@ -224,12 +236,21 @@ class MP4Worker {
       return;
     }
 
-    if (this.reverse && this.playback === "playing") return;
-    if (this.frameIndex === 0) this.frameIndex = this.metadata?.frames - 1;
-    if (this.intervalId) clearInterval(this.intervalId);
+    if (this.playback === "playing") {
+      if (this.reverse) {
+        import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.PlayVideoReverseSuccess }));
+        return;
+      }
+    }
+
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
 
     this.reverse = true;
     this.reverseFrameIndex = 0;
+    this.frameIndex = this.frameIndex === 0 ? this.metadata.frames - 1 : this.frameIndex;
 
     while (this.reverseFrameIndex <= this.frameIndex) {
       if (!this.imageDatas[this.reverseFrameIndex]) {
@@ -253,8 +274,8 @@ class MP4Worker {
     }
 
     this.intervalId = setInterval(() => {
-      if (this.frameIndex >= this.metadata?.frames) {
-        this.handlePause();
+      if (this.frameIndex >= this.metadata.frames) {
+        this.handleEnded();
       } else {
         const chunk = this.chunks[this.frameIndex];
         if (chunk) this.decoder.decode(chunk);
@@ -270,13 +291,25 @@ class MP4Worker {
 
     this.intervalId = setInterval(() => {
       if (this.frameIndex === 0) {
-        this.handlePause();
+        this.handleEnded();
       } else {
         const data = this.imageDatas[this.frameIndex];
         if (data) this.renderer.ctx.putImageData(data, 0, 0);
         this.frameIndex--;
       }
     }, this.frameInterval / this.speed);
+  }
+
+  handleEnded() {
+    if (this.playback === "ended") return;
+    this.playback = "ended";
+
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+
+    import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.VideoEnded }));
   }
 
   handlePause() {
@@ -300,7 +333,7 @@ class MP4Worker {
     import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.PlaybackSpeedSuccess }));
   }
 
-  async handleSeek(_: "frame" | "time", value: number) {
+  async handleSeek(type: "frame" | "time", value: number) {
     const playing = this.playback === "playing";
 
     if (this.intervalId) {
@@ -311,7 +344,8 @@ class MP4Worker {
     this.reverse = false;
     this.seeking = true;
 
-    const frame = Math.max(0, Math.min(this.metadata?.frames - 1, value));
+    const converted = type === "time" ? value * this.metadata.fps : value;
+    const frame = Math.max(0, Math.min(this.metadata.frames - 1, converted));
     const chunk = this.chunks[frame];
 
     if (!chunk) {

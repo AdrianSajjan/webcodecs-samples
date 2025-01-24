@@ -5,6 +5,7 @@ export interface MP4MediaTrack {
   created: Date;
   modified: Date;
   movie_duration: number;
+  movie_timescale: number;
   layer: number;
   alternate_group: number;
   volume: number;
@@ -16,6 +17,7 @@ export interface MP4MediaTrack {
   codec: string;
   language: string;
   nb_samples: number;
+  bitrate: number;
 }
 
 export interface MP4VideoData {
