@@ -25,6 +25,7 @@ export const Page = html`
       <input type="number" id="seek-frame-input" class="bg-neutral-800 text-white px-2 py-1 rounded-md" />
       <button id="seek-frame-button" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer">Seek Frame</button>
       <button id="seek-time-button" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer">Seek Time</button>
+      <button id="next-frame-button" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer">Next Frame</button>
     </div>
     <div id="mp4-player" class="w-full h-auto max-w-[30rem] mt-10 grid place-items-center"></div>
   </section>
@@ -40,6 +41,7 @@ export function Script() {
   const seekTimeButton = document.getElementById("seek-time-button") as HTMLButtonElement;
   const playReverseButton = document.getElementById("play-reverse") as HTMLButtonElement;
   const seekFrameButton = document.getElementById("seek-frame-button") as HTMLButtonElement;
+  const nextFrameButton = document.getElementById("next-frame-button") as HTMLButtonElement;
 
   const speedSelect = document.getElementById("speed") as HTMLSelectElement;
   const seekFrameInput = document.getElementById("seek-frame-input") as HTMLInputElement;
@@ -70,4 +72,6 @@ export function Script() {
   seekFrameButton.addEventListener("click", () => mp4Player.seek("frame", Number(seekFrameInput.value)));
 
   seekTimeButton.addEventListener("click", () => mp4Player.seek("time", Number(seekFrameInput.value)));
+
+  nextFrameButton.addEventListener("click", () => mp4Player.next());
 }

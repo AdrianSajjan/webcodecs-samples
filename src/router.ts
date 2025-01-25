@@ -1,7 +1,7 @@
 import * as Home from "@/routes/home";
 import * as Player from "@/routes/player";
 import * as Recorder from "@/routes/recorder";
-import * as Watermark from "@/routes/watermark";
+import * as Crop from "@/routes/crop";
 
 const routes = [
   {
@@ -20,9 +20,9 @@ const routes = [
     script: Recorder.Script,
   },
   {
-    path: "/watermark",
-    page: Watermark.Page,
-    script: Watermark.Script,
+    path: "/crop",
+    page: Crop.Page,
+    script: Crop.Script,
   },
 ];
 

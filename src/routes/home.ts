@@ -13,7 +13,7 @@ export const Page = html`
     <div class="flex gap-4 mt-8">
       <a href="/player" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer" data-link>Player</a>
       <a href="/recorder" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer" data-link>Recorder</a>
-      <a href="/watermark" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer" data-link>Watermark</a>
+      <a href="/crop" class="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer" data-link>Crop</a>
     </div>
   </section>
 `;

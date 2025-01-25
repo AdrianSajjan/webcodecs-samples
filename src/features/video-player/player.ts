@@ -221,10 +221,19 @@ export class MP4Player extends EventTarget {
   }
 
   async next() {
-    this.worker.postMessage({ type: VideoPlayerEvents.NextFrame });
-    await waitUnitWorkerEvent(this.worker, {
-      success: VideoPlayerEvents.NextFrameSuccess,
-      error: VideoPlayerEvents.NextFrameError,
+    return new Promise<ImageBitmap>((resolve, reject) => {
+      this.worker.postMessage({ type: VideoPlayerEvents.NextFrame });
+      waitUnitWorkerEvent(this.worker, {
+        success: VideoPlayerEvents.NextFrameSuccess,
+        error: VideoPlayerEvents.NextFrameError,
+        onSuccess: (payload) => {
+          this.currentFrame = payload.frame;
+          resolve(payload.bitmap);
+        },
+        onError: (payload) => {
+          reject(payload);
+        },
+      });
     });
   }
 

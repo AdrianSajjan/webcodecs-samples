@@ -149,7 +149,7 @@ class MP4Worker {
     if (this.pendingFrame) {
       if (this.reverse) {
         this.offscreen.draw(this.pendingFrame);
-        const data = this.offscreen.ctx.getImageData(0, 0, this.offscreen.canvas.width, this.offscreen.canvas.height);
+        const data = this.offscreen.context.getImageData(0, 0, this.offscreen.canvas.width, this.offscreen.canvas.height);
         this.imageDatas[this.reverseFrameIndex] = data;
       } else {
         this.renderer.draw(this.pendingFrame);
@@ -306,7 +306,7 @@ class MP4Worker {
         this.handleEnded();
       } else {
         const data = this.imageDatas[this.frameIndex];
-        if (data) this.renderer.ctx.putImageData(data, 0, 0);
+        if (data) this.renderer.context.putImageData(data, 0, 0);
         this.frameIndex--;
 
         import("./constants/events").then(({ VideoPlayerEvents }) => {
@@ -414,26 +414,52 @@ class MP4Worker {
   }
 
   async handlePaintNextFrame() {
-    if (this.frameIndex >= this.metadata.frames - 1) {
+    if (this.frameIndex >= this.metadata.frames) {
       import("./constants/events").then(({ VideoPlayerEvents }) =>
         self.postMessage({ type: VideoPlayerEvents.NextFrameError, payload: { error: "End of frames reached" } })
       );
       return;
     }
 
+    let retries = 0;
+    const maxRetries = 5;
     const chunk = this.chunks[this.frameIndex];
 
+    console.log("PAINTING", this.frameIndex);
+
     if (chunk) {
-      this.seekResolver = Promise.withResolvers();
-      this.decoder.decode(chunk);
-      await this.seekResolver.promise;
+      while (true) {
+        if (retries >= maxRetries) {
+          import("./constants/events").then(({ VideoPlayerEvents }) =>
+            self.postMessage({ type: VideoPlayerEvents.NextFrameError, payload: { error: "Timed out while decoding frame" } })
+          );
+          break;
+        }
+
+        let retrying = false;
+        this.seekResolver = Promise.withResolvers();
+        this.decoder.decode(chunk);
+
+        const id = setTimeout(() => {
+          retries++;
+          retrying = true;
+          this.seekResolver.resolve();
+        }, 1000);
+
+        await this.seekResolver.promise;
+        if (!retrying) {
+          clearTimeout(id);
+          break;
+        }
+      }
     }
 
+    const bitmap = this.renderer.canvas.transferToImageBitmap();
     this.frameIndex++;
 
-    import("./constants/events").then(({ VideoPlayerEvents }) =>
-      self.postMessage({ type: VideoPlayerEvents.NextFrameSuccess, payload: { frame: this.frameIndex } })
-    );
+    import("./constants/events").then(({ VideoPlayerEvents }) => {
+      self.postMessage({ type: VideoPlayerEvents.NextFrameSuccess, payload: { frame: this.frameIndex, bitmap } }, [bitmap]);
+    });
   }
 
   handleFindClosestKeyFrame(index: number) {
