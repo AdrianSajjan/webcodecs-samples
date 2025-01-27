@@ -1,5 +1,5 @@
 import type { RuntimeMessage } from "@/shared/types/events";
-import type { MP4Demuxer, MP4FileMetadata } from "./demuxer";
+import type { MP4AudioMetadata, MP4Demuxer, MP4VideoMetadata } from "./demuxer";
 import type { Renderer } from "./interfaces/renderer";
 
 type Status = "idle" | "pending" | "ready" | "error";
@@ -20,16 +20,20 @@ class MP4Worker {
   frameInterval: number;
   reverseFrameIndex: number;
 
-  chunks: EncodedVideoChunk[];
-  imageDatas: ImageData[];
+  imageDataBuffer: ImageData[];
+  audioChunks: EncodedAudioChunk[];
+  videoChunks: EncodedVideoChunk[];
 
-  metadata!: MP4FileMetadata;
+  videoMetadata!: MP4VideoMetadata;
+  audioMetadata?: MP4AudioMetadata;
+
   playback: PlaybackStatus;
   pendingFrame: VideoFrame | null;
   intervalId: NodeJS.Timeout | null;
 
   demuxer!: MP4Demuxer;
-  decoder!: VideoDecoder;
+  videoDecoder!: VideoDecoder;
+  audioDecoder!: AudioDecoder;
 
   renderer!: Renderer;
   offscreen!: Renderer;
@@ -44,8 +48,9 @@ class MP4Worker {
     this.seeking = false;
     this.reverse = false;
 
-    this.chunks = [];
-    this.imageDatas = [];
+    this.videoChunks = [];
+    this.audioChunks = [];
+    this.imageDataBuffer = [];
 
     this.frameInterval = 0;
     this.frameIndex = 0;
@@ -114,13 +119,13 @@ class MP4Worker {
   }
 
   handleSetupDecoder() {
-    this.decoder = new VideoDecoder({
-      output: this.handleDecoderOutput.bind(this),
+    this.videoDecoder = new VideoDecoder({
+      output: this.handleVideoDecoderOutput.bind(this),
       error: this.handleDecoderError.bind(this),
     });
   }
 
-  handleDecoderOutput(frame: VideoFrame) {
+  handleVideoDecoderOutput(frame: VideoFrame) {
     if (this.seeking) {
       frame.close();
     } else {
@@ -150,7 +155,7 @@ class MP4Worker {
       if (this.reverse) {
         this.offscreen.draw(this.pendingFrame);
         const data = this.offscreen.context.getImageData(0, 0, this.offscreen.canvas.width, this.offscreen.canvas.height);
-        this.imageDatas[this.reverseFrameIndex] = data;
+        this.imageDataBuffer[this.reverseFrameIndex] = data;
       } else {
         this.renderer.draw(this.pendingFrame);
       }
@@ -170,35 +175,50 @@ class MP4Worker {
     const { MP4Demuxer } = await import("./demuxer");
 
     this.demuxer = MP4Demuxer.createInstance(this.uri, {
-      onConfig: this.handleDemuxerConfig.bind(this),
-      onChunk: this.handleDemuxerChunk.bind(this),
-      onMetadata: this.handleDemuxerMetadata.bind(this),
+      onVideoConfig: this.handleVideoConfig.bind(this),
+      onVideoChunk: this.handleVideoChunk.bind(this),
+      onVideoMetadata: this.handleVideoMetadata.bind(this),
+      onAudioChunk: this.handleAudioChunk.bind(this),
     });
   }
 
-  handleDemuxerChunk(chunk: EncodedVideoChunk) {
-    this.chunks.push(chunk);
-    if (this.chunks.length === this.metadata.frames) this.handleUpdateStatus("ready");
+  handleVideoChunk(chunk: EncodedVideoChunk) {
+    this.videoChunks.push(chunk);
+    this.handleCheckReadyStatus();
   }
 
-  handleDemuxerConfig(config: VideoDecoderConfig) {
+  handleAudioChunk(chunk: EncodedAudioChunk) {
+    this.audioChunks.push(chunk);
+    this.handleCheckReadyStatus();
+  }
+
+  handleCheckReadyStatus() {
+    if (
+      this.videoChunks.length !== this.videoMetadata.frames ||
+      (this.audioMetadata && this.audioChunks.length !== this.audioMetadata.samples)
+    )
+      return;
+    this.handleUpdateStatus("ready");
+  }
+
+  handleVideoConfig(config: VideoDecoderConfig) {
     import("./constants/events").then(({ VideoPlayerEvents }) =>
       self.postMessage({ type: VideoPlayerEvents.VideoConfig, payload: { config } })
     );
-    this.decoder.configure(config);
+    this.videoDecoder.configure(config);
   }
 
-  handleDemuxerMetadata(metadata: MP4FileMetadata) {
+  handleVideoMetadata(metadata: MP4VideoMetadata) {
     import("./constants/events").then(({ VideoPlayerEvents }) =>
       self.postMessage({ type: VideoPlayerEvents.VideoMetadata, payload: { metadata } })
     );
 
-    this.metadata = metadata;
-    this.frameInterval = 1000 / this.metadata.fps;
+    this.videoMetadata = metadata;
+    this.frameInterval = 1000 / this.videoMetadata.fps;
   }
 
   handlePlay() {
-    if (this.chunks.length === 0) {
+    if (this.videoChunks.length === 0) {
       import("./constants/events").then(({ VideoPlayerEvents }) =>
         self.postMessage({
           type: VideoPlayerEvents.PlayVideoError,
@@ -222,14 +242,14 @@ class MP4Worker {
 
     this.reverse = false;
     this.playback = "playing";
-    this.frameIndex = this.frameIndex === this.metadata.frames - 1 ? 0 : this.frameIndex;
+    this.frameIndex = this.frameIndex === this.videoMetadata.frames - 1 ? 0 : this.frameIndex;
 
     this.handlePlayInterval();
     import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.PlayVideoSuccess }));
   }
 
   async handlePlayReverse() {
-    if (this.chunks.length === 0) {
+    if (this.videoChunks.length === 0) {
       import("./constants/events").then(({ VideoPlayerEvents }) =>
         self.postMessage({
           type: VideoPlayerEvents.PlayVideoReverseError,
@@ -253,14 +273,14 @@ class MP4Worker {
 
     this.reverse = true;
     this.reverseFrameIndex = 0;
-    this.frameIndex = this.frameIndex === 0 ? this.metadata.frames - 1 : this.frameIndex;
+    this.frameIndex = this.frameIndex === 0 ? this.videoMetadata.frames - 1 : this.frameIndex;
 
     while (this.reverseFrameIndex <= this.frameIndex) {
-      if (!this.imageDatas[this.reverseFrameIndex]) {
-        const chunk = this.chunks[this.reverseFrameIndex];
+      if (!this.imageDataBuffer[this.reverseFrameIndex]) {
+        const chunk = this.videoChunks[this.reverseFrameIndex];
         if (chunk) {
           this.reverseResolver = Promise.withResolvers();
-          this.decoder.decode(chunk);
+          this.videoDecoder.decode(chunk);
           await this.reverseResolver.promise;
         }
       }
@@ -277,20 +297,20 @@ class MP4Worker {
     }
 
     this.intervalId = setInterval(async () => {
-      if (this.frameIndex >= this.metadata.frames) {
+      if (this.frameIndex >= this.videoMetadata.frames) {
         this.handleEnded();
       } else {
-        const chunk = this.chunks[this.frameIndex];
+        const chunk = this.videoChunks[this.frameIndex];
         if (chunk) {
           this.seekResolver = Promise.withResolvers();
-          this.decoder.decode(chunk);
+          this.videoDecoder.decode(chunk);
           await this.seekResolver.promise;
         }
         this.frameIndex++;
 
         import("./constants/events").then(({ VideoPlayerEvents }) => {
           self.postMessage({ type: VideoPlayerEvents.FrameUpdated, payload: { frame: this.frameIndex } });
-          self.postMessage({ type: VideoPlayerEvents.TimeUpdated, payload: { time: this.frameIndex / this.metadata.fps } });
+          self.postMessage({ type: VideoPlayerEvents.TimeUpdated, payload: { time: this.frameIndex / this.videoMetadata.fps } });
         });
       }
     }, this.frameInterval / this.speed);
@@ -305,13 +325,13 @@ class MP4Worker {
       if (this.frameIndex === 0) {
         this.handleEnded();
       } else {
-        const data = this.imageDatas[this.frameIndex];
+        const data = this.imageDataBuffer[this.frameIndex];
         if (data) this.renderer.context.putImageData(data, 0, 0);
         this.frameIndex--;
 
         import("./constants/events").then(({ VideoPlayerEvents }) => {
           self.postMessage({ type: VideoPlayerEvents.FrameUpdated, payload: { frame: this.frameIndex } });
-          self.postMessage({ type: VideoPlayerEvents.TimeUpdated, payload: { time: this.frameIndex / this.metadata.fps } });
+          self.postMessage({ type: VideoPlayerEvents.TimeUpdated, payload: { time: this.frameIndex / this.videoMetadata.fps } });
         });
       }
     }, this.frameInterval / this.speed);
@@ -361,9 +381,9 @@ class MP4Worker {
     this.reverse = false;
     this.seeking = true;
 
-    const converted = type === "time" ? value * this.metadata.fps : value;
-    const frame = Math.max(0, Math.min(this.metadata.frames - 1, converted));
-    const chunk = this.chunks[frame];
+    const converted = type === "time" ? value * this.videoMetadata.fps : value;
+    const frame = Math.max(0, Math.min(this.videoMetadata.frames - 1, converted));
+    const chunk = this.videoChunks[frame];
 
     if (!chunk) {
       import("./constants/events").then(({ VideoPlayerEvents }) =>
@@ -375,7 +395,7 @@ class MP4Worker {
     if (chunk.type === "key") {
       this.seeking = false;
       this.seekResolver = Promise.withResolvers();
-      this.decoder.decode(chunk);
+      this.videoDecoder.decode(chunk);
       await this.seekResolver.promise;
     } else {
       const result = this.handleFindClosestKeyFrame(frame);
@@ -389,10 +409,10 @@ class MP4Worker {
       let index = result.index;
 
       while (index < frame) {
-        const chunk = this.chunks[index];
+        const chunk = this.videoChunks[index];
         if (chunk) {
           this.seekResolver = Promise.withResolvers();
-          this.decoder.decode(chunk);
+          this.videoDecoder.decode(chunk);
           await this.seekResolver.promise;
         }
         index++;
@@ -402,7 +422,7 @@ class MP4Worker {
       this.frameIndex = frame;
 
       this.seekResolver = Promise.withResolvers();
-      this.decoder.decode(chunk);
+      this.videoDecoder.decode(chunk);
       await this.seekResolver.promise;
     }
 
@@ -414,7 +434,7 @@ class MP4Worker {
   }
 
   async handlePaintNextFrame() {
-    if (this.frameIndex >= this.metadata.frames) {
+    if (this.frameIndex >= this.videoMetadata.frames) {
       import("./constants/events").then(({ VideoPlayerEvents }) =>
         self.postMessage({ type: VideoPlayerEvents.NextFrameError, payload: { error: "End of frames reached" } })
       );
@@ -423,7 +443,7 @@ class MP4Worker {
 
     let retries = 0;
     const maxRetries = 5;
-    const chunk = this.chunks[this.frameIndex];
+    const chunk = this.videoChunks[this.frameIndex];
 
     console.log("PAINTING", this.frameIndex);
 
@@ -438,7 +458,7 @@ class MP4Worker {
 
         let retrying = false;
         this.seekResolver = Promise.withResolvers();
-        this.decoder.decode(chunk);
+        this.videoDecoder.decode(chunk);
 
         const id = setTimeout(() => {
           retries++;
@@ -464,7 +484,7 @@ class MP4Worker {
 
   handleFindClosestKeyFrame(index: number) {
     for (let idx = index - 1; idx >= 0; idx--) {
-      const chunk = this.chunks[idx];
+      const chunk = this.videoChunks[idx];
       if (chunk.type === "key") return { index: idx, chunk };
     }
     return { index: -1, chunk: null };

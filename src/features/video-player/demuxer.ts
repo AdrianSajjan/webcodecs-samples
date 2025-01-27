@@ -1,19 +1,29 @@
-import MP4Box, { DataStream, MP4ArrayBuffer, MP4File, MP4Info, Sample } from "mp4box";
+import MP4Box, { DataStream, MP4ArrayBuffer, MP4AudioTrack, MP4File, MP4Info, MP4VideoTrack, Sample } from "mp4box";
 
 type MP4DemuxerStatus = "idle" | "pending" | "demuxing" | "error" | "complete";
 
 type MP4FileSinkStatus = "idle" | "pending" | "error" | "complete";
 
 export interface DemuxerOptions {
-  onConfig: (config: VideoDecoderConfig) => void;
-  onChunk: (chunk: EncodedVideoChunk) => void;
-  onMetadata: (metadata: MP4FileMetadata) => void;
+  onVideoConfig: (config: VideoDecoderConfig) => void;
+  onVideoChunk: (chunk: EncodedVideoChunk) => void;
+  onVideoMetadata: (metadata: MP4VideoMetadata) => void;
+
+  onAudioConfig?: (config: AudioDecoderConfig) => void;
+  onAudioMetadata?: (metadata: MP4AudioMetadata) => void;
+  onAudioChunk?: (chunk: EncodedAudioChunk) => void;
 }
 
-export interface MP4FileMetadata {
+export interface MP4VideoMetadata {
   fps: number;
   duration: number;
   frames: number;
+}
+
+export interface MP4AudioMetadata {
+  bitrate: number;
+  samples: number;
+  volume: number;
 }
 
 class MP4FileSink {
@@ -55,23 +65,34 @@ export class MP4Demuxer {
   file: MP4File;
   status: MP4DemuxerStatus;
 
-  private onChunk: (chunk: EncodedVideoChunk) => void;
-  private onConfig: (config: VideoDecoderConfig) => void;
-  private onMetadata: (metadata: MP4FileMetadata) => void;
+  duration?: number;
+  videoTrack?: MP4VideoTrack;
+  audioTrack?: MP4AudioTrack;
+
+  private onVideoChunk: (chunk: EncodedVideoChunk) => void;
+  private onVideoConfig: (config: VideoDecoderConfig) => void;
+  private onVideoMetadata: (metadata: MP4VideoMetadata) => void;
+
+  private onAudioChunk?: (chunk: EncodedAudioChunk) => void;
+  private onAudioConfig?: (config: AudioDecoderConfig) => void;
+  private onAudioMetadata?: (metadata: MP4AudioMetadata) => void;
 
   constructor(uri: string, options: DemuxerOptions) {
     this.status = "idle";
-    this.onConfig = options.onConfig;
-    this.onChunk = options.onChunk;
-    this.onMetadata = options.onMetadata;
 
-    // Configure an MP4Box File for demuxing
+    this.onVideoConfig = options.onVideoConfig;
+    this.onVideoChunk = options.onVideoChunk;
+    this.onVideoMetadata = options.onVideoMetadata;
+
+    this.onAudioConfig = options.onAudioConfig;
+    this.onAudioChunk = options.onAudioChunk;
+    this.onAudioMetadata = options.onAudioMetadata;
+
     this.file = MP4Box.createFile();
     this.file.onError = this.onError.bind(this);
     this.file.onReady = this.onReady.bind(this);
     this.file.onSamples = this.onSamples.bind(this);
 
-    // Fetch the file and pipe the data through
     const fileSink = MP4FileSink.createInstance(this.file);
     this.fetchFile(uri, fileSink);
   }
@@ -84,14 +105,12 @@ export class MP4Demuxer {
     this.status = "pending";
     try {
       const response = await fetch(uri);
-      // Response must have a body
-      if (!response.body) throw new Error("No response body");
-
-      // Create a WritableStream to pipe the response body to the file sink
+      // Throw an error if the response body is null
+      if (!response.body) throw new Error("Response body is null");
+      // Create a reader to read the response body
       const reader = response.body.getReader();
       const stream = new WritableStream(fileSink, { highWaterMark: 2 });
       const writer = stream.getWriter();
-
       // Read the response body and pipe it to the file sink
       try {
         while (true) {
@@ -99,6 +118,9 @@ export class MP4Demuxer {
           if (done) break;
           await writer.write(value);
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error during fetch";
+        this.onError(message);
       } finally {
         await writer.close();
       }
@@ -111,7 +133,6 @@ export class MP4Demuxer {
   private extractDescription(track: MP4Box.MP4Track): Uint8Array {
     const trak = this.file.getTrackById(track.id);
     if (!trak) throw new Error("Track not found");
-
     // @ts-ignore
     for (const entry of trak.mdia.minf.stbl.stsd.entries) {
       const box = entry.avcC || entry.hvcC || entry.vpcC || entry.av1C;
@@ -121,8 +142,19 @@ export class MP4Demuxer {
         return new Uint8Array(stream.buffer, 8); // Remove the box header
       }
     }
-
+    // No video codec found
     throw new Error("avcC, hvcC, vpcC, or av1C box not found");
+  }
+
+  private extractAudioConfiguration() {
+    // @ts-ignore
+    console.assert(this.file.moov.traks[0].mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].tag == 0x04);
+    // @ts-ignore
+    console.assert(this.file.moov.traks[0].mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].oti == 0x40);
+    // @ts-ignore
+    console.assert(this.file.moov.traks[0].mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].descs[0].tag == 0x05);
+    // @ts-ignore
+    return this.file.moov.traks[0].mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].descs[0].data;
   }
 
   private onError(error: string) {
@@ -133,37 +165,73 @@ export class MP4Demuxer {
   private onReady(info: MP4Info) {
     this.status = "demuxing";
 
-    const track = info.videoTracks[0];
-    const duration = info.duration / info.timescale;
+    this.videoTrack = info.videoTracks[0];
+    this.audioTrack = info.audioTracks[0];
+    this.duration = info.duration / info.timescale;
 
-    this.onConfig({
-      codedWidth: track.video.width,
-      codedHeight: track.video.height,
-      description: this.extractDescription(track),
-      codec: track.codec.startsWith("vp08") ? "vp8" : track.codec,
-    });
+    if (this.videoTrack) {
+      this.onVideoConfig({
+        codedWidth: this.videoTrack.video.width,
+        codedHeight: this.videoTrack.video.height,
+        description: this.extractDescription(this.videoTrack),
+        codec: this.videoTrack.codec.startsWith("vp08") ? "vp8" : this.videoTrack.codec,
+      });
 
-    this.onMetadata({
-      fps: Math.round(track.nb_samples / duration),
-      duration: duration,
-      frames: track.nb_samples,
-    });
+      this.onVideoMetadata({
+        fps: Math.round(this.videoTrack.nb_samples / this.duration),
+        duration: this.duration,
+        frames: this.videoTrack.nb_samples,
+      });
 
-    this.file.setExtractionOptions(track.id);
+      this.file.setExtractionOptions(this.videoTrack.id);
+    }
+
+    if (this.audioTrack) {
+      this.onAudioConfig?.({
+        sampleRate: this.audioTrack.audio.sample_rate,
+        codec: this.audioTrack.codec,
+        numberOfChannels: this.audioTrack.audio.channel_count,
+        description: this.extractAudioConfiguration(),
+      });
+
+      this.onAudioMetadata?.({
+        samples: this.audioTrack.nb_samples,
+        bitrate: this.audioTrack.bitrate,
+        volume: this.audioTrack.volume,
+      });
+
+      this.file.setExtractionOptions(this.audioTrack.id, null);
+    }
+
     this.file.start();
   }
 
-  private onSamples(_track_id: number, _user: any, samples: Sample[]) {
-    for (let index = 0; index < samples.length; index++) {
-      const sample = samples[index];
+  private onSamples(track_id: number, _user: any, samples: Sample[]) {
+    if (track_id === this.videoTrack?.id) {
+      for (let index = 0; index < samples.length; index++) {
+        const sample = samples[index];
 
-      const type = sample.is_sync ? "key" : "delta";
-      const timestamp = (1e6 * sample.cts) / sample.timescale;
-      const duration = (1e6 * sample.duration) / sample.timescale;
-      const data = sample.data;
+        const type = sample.is_sync ? "key" : "delta";
+        const timestamp = (1e6 * sample.cts) / sample.timescale;
+        const duration = (1e6 * sample.duration) / sample.timescale;
+        const data = sample.data;
 
-      const chunk = new EncodedVideoChunk({ data, type, timestamp, duration });
-      this.onChunk(chunk);
+        const chunk = new EncodedVideoChunk({ data, type, timestamp, duration });
+        this.onVideoChunk(chunk);
+      }
+    }
+
+    if (track_id === this.audioTrack?.id) {
+      for (let index = 0; index < samples.length; index++) {
+        const sample = samples[index];
+
+        const timestamp = (1e6 * sample.cts) / sample.timescale;
+        const duration = (1e6 * sample.duration) / sample.timescale;
+        const data = sample.data;
+
+        const chunk = new EncodedAudioChunk({ type: "key", timestamp, duration, data });
+        this.onAudioChunk?.(chunk);
+      }
     }
   }
 }

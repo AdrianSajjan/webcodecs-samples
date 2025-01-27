@@ -1,7 +1,7 @@
 import { RuntimeMessage } from "@/shared/types/events";
 import { waitUnitWorkerEvent } from "@/shared/libs/utils";
 
-import { MP4FileMetadata } from "./demuxer";
+import { MP4VideoMetadata } from "./demuxer";
 import { VideoPlayerEvents } from "./constants/events";
 
 import { VideoPlayerEventMap } from "./interfaces/events";
@@ -18,7 +18,7 @@ export class MP4Player extends EventTarget {
   originalWidth: number;
   originalHeight: number;
 
-  metadata: MP4FileMetadata | null;
+  metadata: MP4VideoMetadata | null;
   config: VideoDecoderConfig | null;
 
   worker: Worker;
@@ -140,7 +140,7 @@ export class MP4Player extends EventTarget {
         break;
 
       case VideoPlayerEvents.VideoMetadata:
-        this.metadata = event.data.payload.metadata as MP4FileMetadata;
+        this.metadata = event.data.payload.metadata as MP4VideoMetadata;
         this.emit(VideoPlayerEvents.VideoMetadata, this.metadata);
         break;
 

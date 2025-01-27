@@ -1,4 +1,4 @@
-import { MP4FileMetadata } from "../demuxer";
+import { MP4VideoMetadata } from "../demuxer";
 import { VideoPlayerStatus } from "./player";
 import { VideoPlayerEvents } from "../constants/events";
 
@@ -7,7 +7,7 @@ export interface VideoPlayerEventMap {
   [VideoPlayerEvents.TimeUpdated]: number;
   [VideoPlayerEvents.FrameUpdated]: number;
   [VideoPlayerEvents.VideoStatus]: VideoPlayerStatus;
-  [VideoPlayerEvents.VideoMetadata]: MP4FileMetadata;
+  [VideoPlayerEvents.VideoMetadata]: MP4VideoMetadata;
   [VideoPlayerEvents.VideoConfig]: VideoDecoderConfig;
 }
 
