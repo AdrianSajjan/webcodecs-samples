@@ -3,11 +3,14 @@ export const VideoPlayerEvents = Object.freeze({
   SetupWorkerSuccess: "setup.worker.success",
   SetupWorkerError: "setup.worker.error",
 
+  AudioBuffer: "audio.buffer",
   AudioConfig: "audio.config",
   VideoConfig: "video.config",
 
-  VideoStatus: "video.status",
   VideoMetadata: "video.metadata",
+  AudioMetadata: "audio.metadata",
+
+  VideoStatus: "video.status",
   VideoPlayback: "video.playback",
   VideoProgress: "video.loading",
   VideoFrame: "video.frame",

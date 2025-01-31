@@ -20,10 +20,16 @@ export interface MP4VideoMetadata {
   frames: number;
 }
 
+AudioEncoder;
+
 export interface MP4AudioMetadata {
+  codec: string;
   bitrate: number;
   samples: number;
   volume: number;
+  duration: number;
+  sampleRate: number;
+  numberOfChannels: number;
 }
 
 class MP4FileSink {
@@ -65,7 +71,9 @@ export class MP4Demuxer {
   file: MP4File;
   status: MP4DemuxerStatus;
 
-  duration?: number;
+  videoDuration?: number;
+  audioDuration?: number;
+
   videoTrack?: MP4VideoTrack;
   audioTrack?: MP4AudioTrack;
 
@@ -167,7 +175,9 @@ export class MP4Demuxer {
 
     this.videoTrack = info.videoTracks[0];
     this.audioTrack = info.audioTracks[0];
-    this.duration = info.duration / info.timescale;
+
+    this.videoDuration = this.videoTrack.duration / this.videoTrack.timescale;
+    this.audioDuration = this.audioTrack.duration / this.audioTrack.timescale;
 
     if (this.videoTrack) {
       this.onVideoConfig({
@@ -178,8 +188,8 @@ export class MP4Demuxer {
       });
 
       this.onVideoMetadata({
-        fps: Math.round(this.videoTrack.nb_samples / this.duration),
-        duration: this.duration,
+        fps: Math.round(this.videoTrack.nb_samples / this.videoDuration),
+        duration: this.videoDuration,
         frames: this.videoTrack.nb_samples,
       });
 
@@ -195,9 +205,13 @@ export class MP4Demuxer {
       });
 
       this.onAudioMetadata?.({
+        codec: this.audioTrack.codec,
         samples: this.audioTrack.nb_samples,
         bitrate: this.audioTrack.bitrate,
         volume: this.audioTrack.volume,
+        duration: this.audioDuration,
+        sampleRate: this.audioTrack.audio.sample_rate,
+        numberOfChannels: this.audioTrack.audio.channel_count,
       });
 
       this.file.setExtractionOptions(this.audioTrack.id, null);

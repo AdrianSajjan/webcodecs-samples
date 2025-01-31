@@ -21,6 +21,8 @@ class MP4Worker {
   reverseFrameIndex: number;
 
   imageDataBuffer: ImageData[];
+  decodedAudioChunks: Float32Array[][];
+
   audioChunks: EncodedAudioChunk[];
   videoChunks: EncodedVideoChunk[];
 
@@ -32,11 +34,11 @@ class MP4Worker {
   intervalId: NodeJS.Timeout | null;
 
   demuxer!: MP4Demuxer;
-  videoDecoder!: VideoDecoder;
-  audioDecoder!: AudioDecoder;
-
   renderer!: Renderer;
   offscreen!: Renderer;
+
+  videoDecoder!: VideoDecoder;
+  audioDecoder!: AudioDecoder;
 
   static createInstance() {
     return new MP4Worker();
@@ -50,15 +52,17 @@ class MP4Worker {
 
     this.videoChunks = [];
     this.audioChunks = [];
-    this.imageDataBuffer = [];
 
+    this.imageDataBuffer = [];
+    this.decodedAudioChunks = [];
+
+    this.speed = 1;
     this.frameInterval = 0;
     this.frameIndex = 0;
     this.reverseFrameIndex = 0;
-    this.speed = 1;
 
-    this.pendingFrame = null;
     this.intervalId = null;
+    this.pendingFrame = null;
 
     self.addEventListener("message", this.handleWorkerMessage.bind(this));
   }
@@ -123,6 +127,10 @@ class MP4Worker {
       output: this.handleVideoDecoderOutput.bind(this),
       error: this.handleDecoderError.bind(this),
     });
+    this.audioDecoder = new AudioDecoder({
+      output: this.handleAudioDecoderOutput.bind(this),
+      error: this.handleDecoderError.bind(this),
+    });
   }
 
   handleVideoDecoderOutput(frame: VideoFrame) {
@@ -134,10 +142,22 @@ class MP4Worker {
         this.reverseResolver.resolve();
       }
     }
-
     if (this.seekResolver) {
       this.seekResolver.resolve();
     }
+  }
+
+  handleAudioDecoderOutput(data: AudioData) {
+    const channelData: Float32Array[] = [];
+
+    for (let i = 0; i < data.numberOfChannels; i++) {
+      const channelBuffer = new Float32Array(data.numberOfFrames);
+      data.copyTo(channelBuffer, { planeIndex: i });
+      channelData.push(channelBuffer);
+    }
+
+    this.decodedAudioChunks.push(channelData);
+    data.close();
   }
 
   handleDecoderError(error: Error) {
@@ -164,6 +184,24 @@ class MP4Worker {
     }
   }
 
+  async handleProcessAudio() {
+    await this.audioDecoder.flush();
+    let offset = 0;
+
+    const numberOfChannels = this.audioMetadata!.numberOfChannels;
+    const totalLength = this.decodedAudioChunks.reduce((sum, chunk) => sum + chunk[0].length, 0);
+    const data = Array.from({ length: numberOfChannels }, () => new Float32Array(totalLength));
+
+    for (const chunk of this.decodedAudioChunks) {
+      for (let channel = 0; channel < numberOfChannels; channel++) {
+        data[channel].set(chunk[channel], offset);
+      }
+      offset += chunk[0].length;
+    }
+
+    return data;
+  }
+
   handleUpdateStatus(status: Status) {
     this.status = status;
     import("./constants/events").then(({ VideoPlayerEvents }) =>
@@ -179,6 +217,7 @@ class MP4Worker {
       onVideoChunk: this.handleVideoChunk.bind(this),
       onVideoMetadata: this.handleVideoMetadata.bind(this),
       onAudioChunk: this.handleAudioChunk.bind(this),
+      onAudioMetadata: this.handleAudioMetadata.bind(this),
     });
   }
 
@@ -189,15 +228,27 @@ class MP4Worker {
 
   handleAudioChunk(chunk: EncodedAudioChunk) {
     this.audioChunks.push(chunk);
+    this.audioDecoder.decode(chunk);
     this.handleCheckReadyStatus();
   }
 
-  handleCheckReadyStatus() {
-    if (
-      this.videoChunks.length !== this.videoMetadata.frames ||
-      (this.audioMetadata && this.audioChunks.length !== this.audioMetadata.samples)
-    )
-      return;
+  async handleCheckReadyStatus() {
+    if (this.videoChunks.length !== this.videoMetadata.frames) return;
+
+    if (this.audioMetadata) {
+      if (this.audioMetadata.samples === this.audioChunks.length) {
+        const buffer = await this.handleProcessAudio();
+        await import("./constants/events").then(({ VideoPlayerEvents }) =>
+          self.postMessage(
+            { type: VideoPlayerEvents.AudioBuffer, payload: { buffer } },
+            buffer.map((channel) => channel.buffer)
+          )
+        );
+        this.audioDecoder.close();
+        this.decodedAudioChunks = [];
+      }
+    }
+
     this.handleUpdateStatus("ready");
   }
 
@@ -212,9 +263,16 @@ class MP4Worker {
     import("./constants/events").then(({ VideoPlayerEvents }) =>
       self.postMessage({ type: VideoPlayerEvents.VideoMetadata, payload: { metadata } })
     );
-
     this.videoMetadata = metadata;
     this.frameInterval = 1000 / this.videoMetadata.fps;
+  }
+
+  handleAudioMetadata(metadata: MP4AudioMetadata) {
+    import("./constants/events").then(({ VideoPlayerEvents }) =>
+      self.postMessage({ type: VideoPlayerEvents.AudioMetadata, payload: { metadata } })
+    );
+    this.audioMetadata = metadata;
+    this.audioDecoder.configure({ codec: metadata.codec, numberOfChannels: metadata.numberOfChannels, sampleRate: metadata.sampleRate });
   }
 
   handlePlay() {

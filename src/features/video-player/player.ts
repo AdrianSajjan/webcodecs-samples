@@ -1,7 +1,7 @@
 import { RuntimeMessage } from "@/shared/types/events";
 import { waitUnitWorkerEvent } from "@/shared/libs/utils";
 
-import { MP4VideoMetadata } from "./demuxer";
+import { MP4AudioMetadata, MP4VideoMetadata } from "./demuxer";
 import { VideoPlayerEvents } from "./constants/events";
 
 import { VideoPlayerEventMap } from "./interfaces/events";
@@ -9,23 +9,32 @@ import { VideoPlayerEvent, VideoPlayerEventListener } from "./interfaces/events"
 import { VideoPlayerStatus, VideoPlayerPlaybackState, VideoPlayerInitializeOptions } from "./interfaces/player";
 
 export class MP4Player extends EventTarget {
-  status: VideoPlayerStatus;
   uri: string;
+  status: VideoPlayerStatus;
   playback: VideoPlayerPlaybackState;
 
   currentTime: number;
   currentFrame: number;
   originalWidth: number;
   originalHeight: number;
+  playbackSpeed: number;
 
-  metadata: MP4VideoMetadata | null;
-  config: VideoDecoderConfig | null;
+  videoMetadata: MP4VideoMetadata | null;
+  videoConfig: VideoDecoderConfig | null;
+
+  audioMetadata: MP4AudioMetadata | null;
+  audioConfig: AudioDecoderConfig | null;
+  audioBuffer: AudioBuffer | null;
+  audioChannelData: Float32Array[] | null;
 
   worker: Worker;
   canvas: HTMLCanvasElement;
+  context!: AudioContext;
 
   resize?: ResizeObserver;
   container?: HTMLElement;
+  source?: AudioBufferSourceNode;
+
   ready?: PromiseWithResolvers<void>;
   options?: VideoPlayerInitializeOptions;
 
@@ -35,13 +44,19 @@ export class MP4Player extends EventTarget {
     this.uri = uri;
     this.status = "idle";
     this.playback = "paused";
+    this.options = options;
 
     this.currentTime = 0;
     this.currentFrame = 0;
+    this.playbackSpeed = 1;
 
-    this.metadata = null;
-    this.config = null;
-    this.options = options;
+    this.videoMetadata = null;
+    this.videoConfig = null;
+
+    this.audioMetadata = null;
+    this.audioConfig = null;
+    this.audioChannelData = null;
+    this.audioBuffer = null;
 
     this.originalWidth = 0;
     this.originalHeight = 0;
@@ -125,6 +140,31 @@ export class MP4Player extends EventTarget {
     return resizeObserver;
   }
 
+  private async createAudioBuffer() {
+    if (!this.audioMetadata || !this.audioChannelData || this.audioBuffer) return;
+
+    this.context = new AudioContext({ latencyHint: "interactive" });
+    this.audioBuffer = this.context.createBuffer(this.audioMetadata.numberOfChannels, this.audioChannelData[0].length, this.audioMetadata.sampleRate);
+
+    for (let channel = 0; channel < this.audioMetadata.numberOfChannels; channel++) {
+      this.audioBuffer.copyToChannel(this.audioChannelData[channel], channel);
+    }
+  }
+
+  async connectAudioSource() {
+    if (this.source) this.source.stop();
+    this.source = this.context.createBufferSource();
+    this.source.buffer = this.audioBuffer;
+    this.source.connect(this.context.destination);
+  }
+
+  private async startAudioSource() {
+    if (this.source) {
+      this.source.playbackRate.value = this.playbackSpeed;
+      this.source.start(0, this.currentTime);
+    }
+  }
+
   private handleWorkerMessage(event: MessageEvent<RuntimeMessage>) {
     switch (event.data.type) {
       case VideoPlayerEvents.VideoStatus:
@@ -134,14 +174,25 @@ export class MP4Player extends EventTarget {
         break;
 
       case VideoPlayerEvents.VideoConfig:
-        this.config = event.data.payload.config as VideoDecoderConfig;
-        this.handleCanvasResize(this.config.codedWidth || 0, this.config.codedHeight || 0);
-        this.emit(VideoPlayerEvents.VideoConfig, this.config);
+        this.videoConfig = event.data.payload.config as VideoDecoderConfig;
+        this.handleCanvasResize(this.videoConfig.codedWidth || 0, this.videoConfig.codedHeight || 0);
+        this.emit(VideoPlayerEvents.VideoConfig, this.videoConfig);
         break;
 
       case VideoPlayerEvents.VideoMetadata:
-        this.metadata = event.data.payload.metadata as MP4VideoMetadata;
-        this.emit(VideoPlayerEvents.VideoMetadata, this.metadata);
+        this.videoMetadata = event.data.payload.metadata as MP4VideoMetadata;
+        this.emit(VideoPlayerEvents.VideoMetadata, this.videoMetadata);
+        break;
+
+      case VideoPlayerEvents.AudioMetadata:
+        this.audioMetadata = event.data.payload.metadata as MP4AudioMetadata;
+        this.emit(VideoPlayerEvents.AudioMetadata, this.audioMetadata);
+        break;
+
+      case VideoPlayerEvents.AudioBuffer:
+        this.audioBuffer = null;
+        this.audioChannelData = event.data.payload.buffer as Float32Array[];
+        this.emit(VideoPlayerEvents.AudioBuffer);
         break;
 
       case VideoPlayerEvents.VideoEnded:
@@ -167,20 +218,12 @@ export class MP4Player extends EventTarget {
   }
 
   // @ts-expect-error
-  addEventListener<T extends keyof VideoPlayerEventMap>(
-    type: T,
-    listener: VideoPlayerEventListener<T>,
-    options?: AddEventListenerOptions
-  ): void {
+  addEventListener<T extends keyof VideoPlayerEventMap>(type: T, listener: VideoPlayerEventListener<T>, options?: AddEventListenerOptions): void {
     super.addEventListener(type, listener as EventListener, options);
   }
 
   // @ts-expect-error
-  removeEventListener<T extends keyof VideoPlayerEventMap>(
-    type: T,
-    listener: VideoPlayerEventListener<T>,
-    options?: EventListenerOptions
-  ): void {
+  removeEventListener<T extends keyof VideoPlayerEventMap>(type: T, listener: VideoPlayerEventListener<T>, options?: EventListenerOptions): void {
     super.removeEventListener(type, listener as EventListener, options);
   }
 
@@ -195,32 +238,32 @@ export class MP4Player extends EventTarget {
   }
 
   async play() {
+    await this.initialize();
+
+    this.createAudioBuffer();
+    this.connectAudioSource();
+    this.startAudioSource();
+
     this.worker.postMessage({ type: VideoPlayerEvents.PlayVideo });
-    await waitUnitWorkerEvent(this.worker, {
-      success: VideoPlayerEvents.PlayVideoSuccess,
-      error: VideoPlayerEvents.PlayVideoError,
-    });
+    await waitUnitWorkerEvent(this.worker, { success: VideoPlayerEvents.PlayVideoSuccess, error: VideoPlayerEvents.PlayVideoError });
     this.playback = "playing";
   }
 
   async reverse() {
+    await this.initialize();
     this.worker.postMessage({ type: VideoPlayerEvents.PlayVideoReverse });
-    await waitUnitWorkerEvent(this.worker, {
-      success: VideoPlayerEvents.PlayVideoReverseSuccess,
-      error: VideoPlayerEvents.PlayVideoReverseError,
-    });
+    await waitUnitWorkerEvent(this.worker, { success: VideoPlayerEvents.PlayVideoReverseSuccess, error: VideoPlayerEvents.PlayVideoReverseError });
     this.playback = "playing";
   }
 
   async seek(type: "frame" | "time", value: number) {
+    await this.initialize();
     this.worker.postMessage({ type: VideoPlayerEvents.SeekVideo, payload: { type, value } });
-    await waitUnitWorkerEvent(this.worker, {
-      success: VideoPlayerEvents.SeekVideoSuccess,
-      error: VideoPlayerEvents.SeekVideoError,
-    });
+    await waitUnitWorkerEvent(this.worker, { success: VideoPlayerEvents.SeekVideoSuccess, error: VideoPlayerEvents.SeekVideoError });
   }
 
   async next() {
+    await this.initialize();
     return new Promise<ImageBitmap>((resolve, reject) => {
       this.worker.postMessage({ type: VideoPlayerEvents.NextFrame });
       waitUnitWorkerEvent(this.worker, {
@@ -238,25 +281,26 @@ export class MP4Player extends EventTarget {
   }
 
   async pause() {
+    await this.initialize();
     this.worker.postMessage({ type: VideoPlayerEvents.PauseVideo });
-    await waitUnitWorkerEvent(this.worker, {
-      success: VideoPlayerEvents.PauseVideoSuccess,
-      error: VideoPlayerEvents.PauseVideoError,
-    });
+    await waitUnitWorkerEvent(this.worker, { success: VideoPlayerEvents.PauseVideoSuccess, error: VideoPlayerEvents.PauseVideoError });
+
+    if (this.source) this.source.stop();
     this.playback = "paused";
   }
 
   async speed(speed: number) {
+    if (this.source) this.source.playbackRate.value = speed;
+    this.playbackSpeed = speed;
+
     this.worker.postMessage({ type: VideoPlayerEvents.PlaybackSpeed, payload: { speed } });
-    await waitUnitWorkerEvent(this.worker, {
-      success: VideoPlayerEvents.PlaybackSpeedSuccess,
-      error: VideoPlayerEvents.PlaybackSpeedError,
-    });
+    await waitUnitWorkerEvent(this.worker, { success: VideoPlayerEvents.PlaybackSpeedSuccess, error: VideoPlayerEvents.PlaybackSpeedError });
   }
 
   async destroy() {
     this.canvas.remove();
     this.worker.terminate();
     this.resize?.disconnect();
+    this.source?.stop();
   }
 }

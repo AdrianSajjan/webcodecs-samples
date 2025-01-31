@@ -61,7 +61,7 @@ export function Script() {
 
   uploadVideoButton.addEventListener("click", () => fileInput.click());
 
-  playButton.addEventListener("click", () => mp4Player.initialize().then(() => mp4Player.play()));
+  playButton.addEventListener("click", () => mp4Player.play());
 
   pauseButton.addEventListener("click", () => mp4Player.pause());
 

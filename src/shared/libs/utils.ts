@@ -11,8 +11,8 @@ interface WaitUnitWorkerEventOptions<P = any, E = any, SE = string, EE = string>
   onError?: (error: E) => void;
 }
 
-export function assert<T>(value?: T | null): asserts value is T {
-  if (!value) throw new Error("Recorder is not initialized");
+export function assert<T>(value?: T | null, message?: string): asserts value is T {
+  if (!value) throw new Error(message || "Assertion failed");
 }
 
 export function wait(ms: number) {
