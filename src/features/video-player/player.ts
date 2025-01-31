@@ -15,9 +15,10 @@ export class MP4Player extends EventTarget {
 
   currentTime: number;
   currentFrame: number;
+  playbackSpeed: number;
+
   originalWidth: number;
   originalHeight: number;
-  playbackSpeed: number;
 
   videoMetadata: MP4VideoMetadata | null;
   videoConfig: VideoDecoderConfig | null;
@@ -29,12 +30,12 @@ export class MP4Player extends EventTarget {
 
   worker: Worker;
   canvas: HTMLCanvasElement;
-  context!: AudioContext;
 
-  resize?: ResizeObserver;
-  container?: HTMLElement;
+  context?: AudioContext;
   source?: AudioBufferSourceNode;
+  resize?: ResizeObserver;
 
+  container?: HTMLElement;
   ready?: PromiseWithResolvers<void>;
   options?: VideoPlayerInitializeOptions;
 
@@ -152,10 +153,12 @@ export class MP4Player extends EventTarget {
   }
 
   async connectAudioSource() {
-    if (this.source) this.source.stop();
-    this.source = this.context.createBufferSource();
-    this.source.buffer = this.audioBuffer;
-    this.source.connect(this.context.destination);
+    if (this.context) {
+      if (this.source) this.source.stop();
+      this.source = this.context.createBufferSource();
+      this.source.buffer = this.audioBuffer;
+      this.source.connect(this.context.destination);
+    }
   }
 
   private async startAudioSource() {

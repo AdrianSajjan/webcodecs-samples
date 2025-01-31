@@ -204,9 +204,7 @@ class MP4Worker {
 
   handleUpdateStatus(status: Status) {
     this.status = status;
-    import("./constants/events").then(({ VideoPlayerEvents }) =>
-      self.postMessage({ type: VideoPlayerEvents.VideoStatus, payload: { status: this.status } })
-    );
+    import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.VideoStatus, payload: { status: this.status } }));
   }
 
   async handleSetupDemuxer() {
@@ -253,24 +251,18 @@ class MP4Worker {
   }
 
   handleVideoConfig(config: VideoDecoderConfig) {
-    import("./constants/events").then(({ VideoPlayerEvents }) =>
-      self.postMessage({ type: VideoPlayerEvents.VideoConfig, payload: { config } })
-    );
+    import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.VideoConfig, payload: { config } }));
     this.videoDecoder.configure(config);
   }
 
   handleVideoMetadata(metadata: MP4VideoMetadata) {
-    import("./constants/events").then(({ VideoPlayerEvents }) =>
-      self.postMessage({ type: VideoPlayerEvents.VideoMetadata, payload: { metadata } })
-    );
+    import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.VideoMetadata, payload: { metadata } }));
     this.videoMetadata = metadata;
     this.frameInterval = 1000 / this.videoMetadata.fps;
   }
 
   handleAudioMetadata(metadata: MP4AudioMetadata) {
-    import("./constants/events").then(({ VideoPlayerEvents }) =>
-      self.postMessage({ type: VideoPlayerEvents.AudioMetadata, payload: { metadata } })
-    );
+    import("./constants/events").then(({ VideoPlayerEvents }) => self.postMessage({ type: VideoPlayerEvents.AudioMetadata, payload: { metadata } }));
     this.audioMetadata = metadata;
     this.audioDecoder.configure({ codec: metadata.codec, numberOfChannels: metadata.numberOfChannels, sampleRate: metadata.sampleRate });
   }
@@ -503,8 +495,6 @@ class MP4Worker {
     const maxRetries = 5;
     const chunk = this.videoChunks[this.frameIndex];
 
-    console.log("PAINTING", this.frameIndex);
-
     if (chunk) {
       while (true) {
         if (retries >= maxRetries) {
@@ -525,7 +515,9 @@ class MP4Worker {
         }, 1000);
 
         await this.seekResolver.promise;
+
         if (!retrying) {
+          retries = 0;
           clearTimeout(id);
           break;
         }
@@ -533,6 +525,7 @@ class MP4Worker {
     }
 
     const bitmap = this.renderer.canvas.transferToImageBitmap();
+    this.renderer.context.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height);
     this.frameIndex++;
 
     import("./constants/events").then(({ VideoPlayerEvents }) => {

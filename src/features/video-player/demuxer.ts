@@ -113,13 +113,12 @@ export class MP4Demuxer {
     this.status = "pending";
     try {
       const response = await fetch(uri);
-      // Throw an error if the response body is null
       if (!response.body) throw new Error("Response body is null");
-      // Create a reader to read the response body
+
       const reader = response.body.getReader();
       const stream = new WritableStream(fileSink, { highWaterMark: 2 });
       const writer = stream.getWriter();
-      // Read the response body and pipe it to the file sink
+
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -140,7 +139,7 @@ export class MP4Demuxer {
 
   private extractDescription(track: MP4Box.MP4Track): Uint8Array {
     const trak = this.file.getTrackById(track.id);
-    if (!trak) throw new Error("Track not found");
+    if (!trak) throw new Error("Video track not found");
     // @ts-ignore
     for (const entry of trak.mdia.minf.stbl.stsd.entries) {
       const box = entry.avcC || entry.hvcC || entry.vpcC || entry.av1C;
@@ -154,15 +153,17 @@ export class MP4Demuxer {
     throw new Error("avcC, hvcC, vpcC, or av1C box not found");
   }
 
-  private extractAudioConfiguration() {
+  private extractAudioConfiguration(track: MP4Box.MP4Track) {
+    const trak = this.file.getTrackById(track.id);
+    if (!trak) throw new Error("Audio track not found");
     // @ts-ignore
-    console.assert(this.file.moov.traks[0].mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].tag == 0x04);
+    console.assert(trak.mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].tag == 0x04);
     // @ts-ignore
-    console.assert(this.file.moov.traks[0].mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].oti == 0x40);
+    console.assert(trak.mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].oti == 0x40);
     // @ts-ignore
-    console.assert(this.file.moov.traks[0].mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].descs[0].tag == 0x05);
+    console.assert(trak.mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].descs[0].tag == 0x05);
     // @ts-ignore
-    return this.file.moov.traks[0].mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].descs[0].data;
+    return trak.mdia.minf.stbl.stsd.entries[0].esds.esd.descs[0].descs[0].data;
   }
 
   private onError(error: string) {
@@ -176,10 +177,9 @@ export class MP4Demuxer {
     this.videoTrack = info.videoTracks[0];
     this.audioTrack = info.audioTracks[0];
 
-    this.videoDuration = this.videoTrack.duration / this.videoTrack.timescale;
-    this.audioDuration = this.audioTrack.duration / this.audioTrack.timescale;
-
     if (this.videoTrack) {
+      this.videoDuration = this.videoTrack.duration / this.videoTrack.timescale;
+
       this.onVideoConfig({
         codedWidth: this.videoTrack.video.width,
         codedHeight: this.videoTrack.video.height,
@@ -197,11 +197,13 @@ export class MP4Demuxer {
     }
 
     if (this.audioTrack) {
+      this.audioDuration = this.audioTrack.duration / this.audioTrack.timescale;
+
       this.onAudioConfig?.({
         sampleRate: this.audioTrack.audio.sample_rate,
         codec: this.audioTrack.codec,
         numberOfChannels: this.audioTrack.audio.channel_count,
-        description: this.extractAudioConfiguration(),
+        description: this.extractAudioConfiguration(this.audioTrack),
       });
 
       this.onAudioMetadata?.({
