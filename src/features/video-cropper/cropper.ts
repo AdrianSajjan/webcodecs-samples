@@ -66,8 +66,8 @@ export class VideoCropper {
     const top = this.position.top;
     const left = this.position.left;
 
-    const fps = this.player.metadata?.fps || 30;
-    const codec = this.player.config?.codec || "avc1.64002A";
+    const fps = this.player.videoMetadata?.fps || 30;
+    const codec = this.player.videoConfig?.codec || "avc1.64002A";
 
     const width = this.dimension.width % 2 === 0 ? this.dimension.width : this.dimension.width - 1;
     const height = this.dimension.height % 2 === 0 ? this.dimension.height : this.dimension.height - 1;
@@ -94,7 +94,7 @@ export class VideoCropper {
     videoEncoder.configure(config);
 
     while (true) {
-      if (this.player.currentFrame >= this.player.metadata!.frames) break;
+      if (this.player.currentFrame >= this.player.videoMetadata!.frames) break;
 
       const keyframe = this.player.currentFrame % (fps * 2) === 0;
       const timestamp = (this.player.currentFrame * 1e6) / fps;

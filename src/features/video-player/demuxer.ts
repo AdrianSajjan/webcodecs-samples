@@ -20,8 +20,6 @@ export interface MP4VideoMetadata {
   frames: number;
 }
 
-AudioEncoder;
-
 export interface MP4AudioMetadata {
   codec: string;
   bitrate: number;
